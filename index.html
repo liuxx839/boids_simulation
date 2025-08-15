@@ -36,8 +36,8 @@
         <div class="danger"><span style="background-color: #f07167;"></span>捕食者</div>
         <hr>
         <div class="highlight"><strong>点击屏幕可引导Boids</strong></div>
-        <div>Boids现在需要寻找食物生存</div>
-        <div>它们会躲进半透明的安全区</div>
+        <div>群体在密集时有机会繁衍</div>
+        <div>墓碑障碍物会在3秒后消失</div>
     </div>
     <canvas id="boidsCanvas"></canvas>
 
@@ -69,111 +69,35 @@ class Boid extends Agent {
         super(x, y, config);
         this.birthingUrge = 0;
         this.awarenessEndTime = 0;
-        // --- 新增: 能量机制 ---
-        this.energy = 100; // 初始能量
-        this.maxEnergy = 150; // 最大能量
     }
     
-    showAwarenessIndicator(duration = 1500) { this.awarenessEndTime = Date.now() + duration; }
+    showAwarenessIndicator(duration = 1500) {
+        this.awarenessEndTime = Date.now() + duration;
+    }
 
-    // --- 修改: applyBehaviors 方法，增加了对食物和安全区的反应 ---
-    applyBehaviors(allBoids, ownFlock, predators, obstacles, target, foodSources, safeZones) {
+    applyBehaviors(allBoids, ownFlock, predators, obstacles, target) {
         if (!this.isAlive) return;
-
-        // 基础行为
         const avoid = this.avoid(obstacles).mult(this.config.avoidWeight);
         const sep = this.separation(allBoids).mult(this.config.separationWeight);
         const ali = this.alignment(ownFlock).mult(this.config.alignmentWeight);
         const coh = this.cohesion(ownFlock).mult(this.config.cohesionWeight);
-        
         this.acceleration.add(avoid); this.acceleration.add(sep); this.acceleration.add(ali); this.acceleration.add(coh);
-
-        // --- 新增: 策略决策 ---
-        let isThreatened = this.isThreatened(predators); // 判断是否受威胁
-        
-        if (isThreatened) {
-            // 受威胁时，优先逃往最近的安全区
-            const fleeToSafeZone = this.seekClosest(safeZones).mult(this.config.seekWeight * 1.5); // 逃往安全区的欲望更强
-            this.acceleration.add(fleeToSafeZone);
-        } else if (this.energy < 70) {
-            // 不受威胁且饥饿时，寻找食物
-            const seekFood = this.seekClosest(foodSources, true).mult(this.config.seekWeight);
-            this.acceleration.add(seekFood);
-        }
-
-        // 捕食者规避/反击行为
         if (this.config.canMob) {
             let localMatesCount = 0;
             for (let other of ownFlock) { if (other !== this && Vector.dist(this.position, other.position) < this.config.perceptionRadius) { localMatesCount++; } }
             if (localMatesCount > this.config.mobThreshold) { this.acceleration.add(this.mob(predators).mult(this.config.mobWeight)); } else { this.acceleration.add(this.flee(predators).mult(this.config.fleeWeight)); }
         } else { this.acceleration.add(this.flee(predators).mult(this.config.fleeWeight)); }
-        
-        // 鼠标引导行为
         if (target && Vector.dist(this.position, target) < MOUSE_INFLUENCE_RADIUS) { this.acceleration.add(this.seek(target).mult(this.config.seekWeight)); }
-    }
-    
-    // --- 新增: 判断是否受威胁 ---
-    isThreatened(predators) {
-        for (let p of predators) {
-            if (Vector.dist(this.position, p.position) < this.config.fleeRadius) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // --- 新增: 寻找最近的目标 (可用于食物、安全区等) ---
-    seekClosest(targets, eat = false) {
-        let closestDist = Infinity;
-        let closestTarget = null;
-        for (let target of targets) {
-            let d = Vector.dist(this.position, target.position);
-            if (d < closestDist) {
-                closestDist = d;
-                closestTarget = target;
-            }
-        }
-        
-        if (closestTarget) {
-            if (eat && closestDist < 10) { // 如果是食物并且足够近
-                this.energy = Math.min(this.maxEnergy, this.energy + closestTarget.energyValue);
-                closestTarget.isEaten = true; // 标记食物被吃掉
-            }
-            return this.seek(closestTarget.position);
-        }
-        return new Vector();
-    }
-
-    // --- 修改: Boid的update方法以包含能量消耗 ---
-    update() {
-        if (!this.isAlive) return;
-        super.update(); // 调用父类的update
-        this.energy -= 0.08; // 持续消耗能量
-        if (this.energy <= 0) {
-            this.die(); // 能量耗尽则死亡
-        }
-    }
-
-    // --- 新增: Boid的死亡方法 ---
-    die() {
-        this.isAlive = false;
-        this.deathTime = Date.now();
-        tombstones.push(this);
     }
 
     handleReproduction(ownFlock) {
-        // --- 修改: 繁殖需要消耗能量 ---
-        if (!this.config.canReproduce || this.energy < 120) return null; // 能量充足才能繁殖
-        
+        if (!this.config.canReproduce) return null;
         let closeMates = 0;
         for (let other of ownFlock) { if (other !== this && Vector.dist(this.position, other.position) < this.config.reproductionRadius) { closeMates++; } }
-        
         if (closeMates >= this.config.reproductionThreshold) { this.birthingUrge += 0.5; } else { this.birthingUrge = Math.max(0, this.birthingUrge - 1); }
-        
         if (this.birthingUrge >= this.config.reproductionUrgeMax) {
             this.birthingUrge = 0;
             if (Math.random() < this.config.reproductionChance) {
-                this.energy -= 50; // 繁殖消耗大量能量
                 return new Boid(this.position.x, this.position.y, this.config);
             }
         }
@@ -193,26 +117,28 @@ class Boid extends Agent {
             const timeLeft = this.awarenessEndTime - Date.now();
             const fadeDuration = 500;
             let opacity = 1;
-            if (timeLeft < fadeDuration) { opacity = timeLeft / fadeDuration; }
-            ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`; ctx.textAlign = 'center'; ctx.fillText('!', 0, -12); ctx.restore();
+            if (timeLeft < fadeDuration) {
+                opacity = timeLeft / fadeDuration;
+            }
+            ctx.save();
+            ctx.translate(this.position.x, this.position.y);
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`;
+            ctx.textAlign = 'center';
+            ctx.fillText('!', 0, -12);
+            ctx.restore();
         }
 
         if (!this.isAlive) { this.drawTombstone(ctx); return; }
-
-        // --- 新增: 根据能量值改变Boid的透明度 ---
-        const alpha = 0.3 + (this.energy / this.maxEnergy) * 0.7;
-
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
         ctx.beginPath();
-        ctx.moveTo(10, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath();
-        // 将颜色转换为rgba以应用透明度
-        let hex = this.config.color.replace('#', '');
-        let r = parseInt(hex.substring(0,2), 16);
-        let g = parseInt(hex.substring(2,4), 16);
-        let b = parseInt(hex.substring(4,6), 16);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.moveTo(10, 0);
+        ctx.lineTo(-5, -5);
+        ctx.lineTo(-5, 5);
+        ctx.closePath();
+        ctx.fillStyle = this.config.color;
         ctx.fill();
         ctx.restore();
     }
@@ -223,32 +149,16 @@ class Boid extends Agent {
 // --- Predator 类 ---
 class Predator extends Agent {
     constructor(x, y, config) { super(x, y, config); }
-    
-    // --- 修改: 捕食者行为，增加对安全区的躲避 ---
-    applyBehaviors(allBoids, otherPredators, safeZones) {
+    applyBehaviors(allBoids, otherPredators) {
         if (!this.isAlive) return;
         let attackers = [];
         for (let boid of allBoids) { if (Vector.dist(this.position, boid.position) < this.config.perceptionRadius) { let toPredator = Vector.sub(this.position, boid.position).normalize(); let boidDir = boid.velocity.mag() > 0 ? new Vector(boid.velocity.x, boid.velocity.y).normalize() : new Vector(); if ((toPredator.x * boidDir.x + toPredator.y * boidDir.y) > 0.8) { attackers.push(boid); } } }
-        
-        // 躲避安全区
-        const avoidSafeZones = this.avoid(safeZones).mult(this.config.fleeWeight * 2);
-        this.acceleration.add(avoidSafeZones);
-
-        if (attackers.length > this.config.intimidationThreshold) {
-            this.acceleration.add(this.flee(attackers).mult(this.config.fleeWeight));
-        } else {
-            this.acceleration.add(this.seek(allBoids).mult(this.config.seekWeight));
-        }
+        if (attackers.length > this.config.intimidationThreshold) { this.acceleration.add(this.flee(attackers).mult(this.config.fleeWeight)); } else { this.acceleration.add(this.seek(allBoids).mult(this.config.seekWeight)); }
         this.acceleration.add(this.separation(otherPredators).mult(this.config.separationWeight));
     }
-
     flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { s.add(Vector.sub(this.position,p.position)); t++; } if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
     seek(prey) { let closestDist = Infinity; let closestPrey = null; for (let b of prey) { if (b.isAlive && Vector.dist(this.position, b.position) < this.config.perceptionRadius) { let d = Vector.dist(this.position, b.position); if (d < closestDist) { closestDist = d; closestPrey = b; } } } if (closestPrey) { let d = Vector.sub(closestPrey.position, this.position); d.normalize().mult(this.config.maxSpeed); return Vector.sub(d, this.velocity).limit(this.config.maxForce); } return new Vector(); }
     separation(otherPredators) { let s = new Vector(); let t=0; for (let o of otherPredators) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
-    
-    // --- 新增: 捕食者也需要躲避机制，这里复用Boid的 ---
-    avoid(obstacles) { let s = new Vector(); for (let o of obstacles) { let d=Vector.dist(this.position,o.position); if (d < (o.radius || this.config.perceptionRadius / 2)) { let diff = Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff);}} if (s.mag()>0) { s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*3); } return s; }
-
     draw(ctx) { if(!this.isAlive) return; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-7, -7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
 }
 
@@ -281,39 +191,17 @@ const predatorConfig = { color: '#f07167', maxSpeed: 4.5, maxForce: 0.12, percep
 // --- 初始化 ---
 const NUM_BOIDS_PER_FLOCK = 70;
 let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombstones = [];
-// --- 新增: 食物和安全区数组 ---
-let foodSources = [];
-let safeZones = [];
 let initialCountA = 0, initialCountB = 0, initialCountC = 0;
 const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
 
 function initialize() {
     flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = [];
-    foodSources = []; safeZones = []; // 重置
-
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
     for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
-    
-    // --- 新增: 初始化安全区 ---
-    safeZones.push({ position: new Vector(w() * 0.2, h() * 0.5), radius: 80 });
-    safeZones.push({ position: new Vector(w() * 0.8, h() * 0.5), radius: 80 });
-
     initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
-}
-
-// --- 新增: 生成食物的函数 ---
-function spawnFood() {
-    if (foodSources.length < 50 && Math.random() < 0.1) {
-        foodSources.push({
-            position: new Vector(Math.random() * w(), Math.random() * h()),
-            energyValue: 30,
-            isEaten: false
-        });
-    }
-    foodSources = foodSources.filter(f => !f.isEaten);
 }
 
 // --- 动画循环 ---
@@ -338,31 +226,11 @@ function animate() {
         ctx.lineWidth = 2;
         ctx.stroke();
     }
-    
-    // --- 新增: 绘制安全区 ---
-    safeZones.forEach(zone => {
-        ctx.beginPath();
-        ctx.arc(zone.position.x, zone.position.y, zone.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(79, 138, 139, 0.1)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(79, 138, 139, 0.4)';
-        ctx.stroke();
-    });
-
-    // --- 新增: 生成并绘制食物 ---
-    spawnFood();
-    foodSources.forEach(food => {
-        ctx.beginPath();
-        ctx.arc(food.position.x, food.position.y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#76c893';
-        ctx.fill();
-    });
 
     let newborns = [];
     allBoids.forEach(boid => {
         let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC;
-        // --- 修改: 传入食物和安全区信息 ---
-        boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget, foodSources, safeZones);
+        boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget);
         boid.update();
         boid.edges();
         boid.draw(ctx);
@@ -370,13 +238,6 @@ function animate() {
         if (newborn) { newborns.push(newborn); }
     });
     
-    // 将因饥饿死亡的boid移出主列表
-    for (let i = allBoids.length - 1; i >= 0; i--) {
-        if (!allBoids[i].isAlive) {
-            allBoids.splice(i, 1);
-        }
-    }
-
     newborns.forEach(nb => {
         allBoids.push(nb);
         if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; }
@@ -385,16 +246,9 @@ function animate() {
     });
 
     predators.forEach(predator => {
-        // --- 修改: 传入安全区信息 ---
-        predator.applyBehaviors(allBoids, predators, safeZones);
+        predator.applyBehaviors(allBoids, predators);
         predator.update(); predator.edges(); predator.draw(ctx);
-        for (let i = allBoids.length - 1; i >= 0; i--) {
-            const boid = allBoids[i];
-            if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) {
-                boid.die(); // 使用die方法来处理死亡
-                allBoids.splice(i, 1);
-            }
-        }
+        for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } }
     });
     
     flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
@@ -455,7 +309,7 @@ canvas.addEventListener('mousedown', e => {
         playSound(soundC, finalVolumeC);
     }
 });
-window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; initialize(); });
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
 
 // 启动
 initialize();
