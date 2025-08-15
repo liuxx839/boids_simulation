@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Boids终极生态模型：繁衍与生命周期</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; cursor: pointer; }
+        canvas { display: block; }
+        .info { position: absolute; top: 10px; left: 10px; padding: 12px; background-color: rgba(0,0,0,0.7); border-radius: 5px; font-size: 14px; pointer-events: none; min-width: 230px; }
+        .info span { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
+        .info div { margin-bottom: 6px; }
+        .info hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
+        .info .highlight { color: #58a6ff; }
+        .info .danger { color: #f07167; }
+        .info .brave { color: #a374ff; }
+        .info strong { float: right; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="info">
+        <div><span style="background-color: #4f8a8b;"></span>群组 A (普通)<strong id="percentA">100%</strong></div>
+        <div><span style="background-color: #ffcb74;"></span>群组 B (高速)<strong id="percentB">100%</strong></div>
+        <div class="brave"><span style="background-color: #a374ff;"></span>群组 C (会反击)<strong id="percentC">100%</strong></div>
+        <div class="danger"><span style="background-color: #f07167;"></span>捕食者</div>
+        <hr>
+        <div class="highlight"><strong>点击屏幕可引导Boids</strong></div>
+        <div>群体在密集时有机会繁衍</div>
+        <div>墓碑障碍物会在3秒后消失</div>
+    </div>
+    <canvas id="boidsCanvas"></canvas>
+
+<script>
+// --- 向量类 ---
+class Vector {
+    constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+    add(v) { this.x += v.x; this.y += v.y; return this; }
+    sub(v) { this.x -= v.x; this.y -= v.y; return this; }
+    mult(s) { this.x *= s; this.y *= s; return this; }
+    div(s) { if (s !== 0) { this.x /= s; this.y /= s; } return this; }
+    mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    normalize() { const m = this.mag(); if (m > 0) this.div(m); return this; }
+    limit(max) { if (this.mag() > max) this.normalize().mult(max); return this; }
+    static dist(v1, v2) { const dx = v1.x - v2.x; const dy = v1.y - v2.y; return Math.sqrt(dx * dx + dy * dy); }
+    static sub(v1, v2) { return new Vector(v1.x - v2.x, v1.y - v2.y); }
+}
+
+// --- 通用智能体基类 ---
+class Agent {
+    constructor(x, y, config) { this.position = new Vector(x, y); this.velocity = new Vector(Math.random()*2-1, Math.random()*2-1); this.acceleration = new Vector(); this.config = config; this.velocity.limit(this.config.maxSpeed); this.isAlive = true; this.deathTime = null; }
+    update() { if (!this.isAlive) return; this.velocity.add(this.acceleration); this.velocity.limit(this.config.maxSpeed); this.position.add(this.velocity); this.acceleration.mult(0); }
+    edges() { if (!this.isAlive) return; if (this.position.x > window.innerWidth) this.position.x = 0; else if (this.position.x < 0) this.position.x = window.innerWidth; if (this.position.y > window.innerHeight) this.position.y = 0; else if (this.position.y < 0) this.position.y = window.innerHeight; }
+}
+
+// --- Boid 类 ---
+class Boid extends Agent {
+    constructor(x, y, config) {
+        super(x, y, config);
+        this.birthingUrge = 0; // 新增：繁衍潜力
+    }
+
+    applyBehaviors(allBoids, ownFlock, predators, obstacles, target) {
+        if (!this.isAlive) return;
+        const avoid = this.avoid(obstacles).mult(this.config.avoidWeight);
+        const sep = this.separation(allBoids).mult(this.config.separationWeight);
+        const ali = this.alignment(ownFlock).mult(this.config.alignmentWeight);
+        const coh = this.cohesion(ownFlock).mult(this.config.cohesionWeight);
+        this.acceleration.add(avoid); this.acceleration.add(sep); this.acceleration.add(ali); this.acceleration.add(coh);
+        if (this.config.canMob) {
+            let localMatesCount = 0;
+            for (let other of ownFlock) { if (other !== this && Vector.dist(this.position, other.position) < this.config.perceptionRadius) { localMatesCount++; } }
+            if (localMatesCount > this.config.mobThreshold) { this.acceleration.add(this.mob(predators).mult(this.config.mobWeight)); } else { this.acceleration.add(this.flee(predators).mult(this.config.fleeWeight)); }
+        } else { this.acceleration.add(this.flee(predators).mult(this.config.fleeWeight)); }
+        if (target && Vector.dist(this.position, target) < MOUSE_INFLUENCE_RADIUS) { this.acceleration.add(this.seek(target).mult(this.config.seekWeight)); }
+    }
+
+    handleReproduction(ownFlock) {
+        if (!this.config.canReproduce) return null;
+        let closeMates = 0;
+        for (let other of ownFlock) { if (other !== this && Vector.dist(this.position, other.position) < this.config.reproductionRadius) { closeMates++; } }
+        if (closeMates >= this.config.reproductionThreshold) { this.birthingUrge += 0.5; } else { this.birthingUrge = Math.max(0, this.birthingUrge - 1); }
+        if (this.birthingUrge >= this.config.reproductionUrgeMax) {
+            this.birthingUrge = 0;
+            if (Math.random() < this.config.reproductionChance) {
+                return new Boid(this.position.x, this.position.y, this.config);
+            }
+        }
+        return null;
+    }
+
+    mob(predators) { let s = new Vector(); let t=0; for (let p of predators) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(p.position,this.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*1.5); } return s; }
+    flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(this.position,p.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
+    avoid(obstacles) { let s = new Vector(); for (let o of obstacles) { let d=Vector.dist(this.position,o.position); if (d < this.config.avoidRadius) { let diff = Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff);}} if (s.mag()>0) { s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
+    seek(target) { let d = Vector.sub(target, this.position); d.normalize().mult(this.config.maxSpeed); return Vector.sub(d, this.velocity).limit(this.config.maxForce*1.5); }
+    separation(allBoids) { let s = new Vector(); let t=0; for (let o of allBoids) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
+    alignment(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.velocity); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
+    cohesion(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.position); t++; }} if (t>0) { s.div(t); s.sub(this.position); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
+    draw(ctx) { if (!this.isAlive) { this.drawTombstone(ctx); return; } ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
+    drawTombstone(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.strokeStyle = '#666'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); ctx.restore(); }
+}
+
+// --- Predator 类 ---
+class Predator extends Agent {
+    constructor(x, y, config) { super(x, y, config); }
+    applyBehaviors(allBoids, otherPredators) {
+        if (!this.isAlive) return;
+        let attackers = [];
+        for (let boid of allBoids) { if (Vector.dist(this.position, boid.position) < this.config.perceptionRadius) { let toPredator = Vector.sub(this.position, boid.position).normalize(); let boidDir = boid.velocity.mag() > 0 ? new Vector(boid.velocity.x, boid.velocity.y).normalize() : new Vector(); if ((toPredator.x * boidDir.x + toPredator.y * boidDir.y) > 0.8) { attackers.push(boid); } } }
+        if (attackers.length > this.config.intimidationThreshold) { this.acceleration.add(this.flee(attackers).mult(this.config.fleeWeight)); } else { this.acceleration.add(this.seek(allBoids).mult(this.config.seekWeight)); }
+        this.acceleration.add(this.separation(otherPredators).mult(this.config.separationWeight));
+    }
+    flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { s.add(Vector.sub(this.position,p.position)); t++; } if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
+    seek(prey) { let closestDist = Infinity; let closestPrey = null; for (let b of prey) { if (b.isAlive && Vector.dist(this.position, b.position) < this.config.perceptionRadius) { let d = Vector.dist(this.position, b.position); if (d < closestDist) { closestDist = d; closestPrey = b; } } } if (closestPrey) { let d = Vector.sub(closestPrey.position, this.position); d.normalize().mult(this.config.maxSpeed); return Vector.sub(d, this.velocity).limit(this.config.maxForce); } return new Vector(); }
+    separation(otherPredators) { let s = new Vector(); let t=0; for (let o of otherPredators) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
+    draw(ctx) { if(!this.isAlive) return; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-7, -7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
+}
+
+// --- 主程序 ---
+const canvas = document.getElementById('boidsCanvas'), ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+let mouseTarget = null, targetTimeout = null;
+const MOUSE_INFLUENCE_RADIUS = 250;
+
+// --- 配置区域 ---
+const reproductionConfig = { canReproduce: true, reproductionRadius: 20, reproductionThreshold: 3, reproductionUrgeMax: 100, reproductionChance: 0.30 };
+const flockA_Config = { color: '#4f8a8b', maxSpeed: 3.5, maxForce: 0.05, perceptionRadius: 50, separationRadius: 25, fleeRadius: 100, avoidRadius: 40, cohesionWeight: 1.0, alignmentWeight: 1.0, separationWeight: 1.5, fleeWeight: 2.5, seekWeight: 1.2, avoidWeight: 3.0, canMob: false, ...reproductionConfig };
+const flockB_Config = { color: '#ffcb74', maxSpeed: 4.0, maxForce: 0.07, perceptionRadius: 60, separationRadius: 30, fleeRadius: 120, avoidRadius: 50, cohesionWeight: 0.8, alignmentWeight: 1.2, separationWeight: 1.3, fleeWeight: 2.0, seekWeight: 1.0, avoidWeight: 2.8, canMob: false, ...reproductionConfig };
+const flockC_Config = { color: '#a374ff', maxSpeed: 3.8, maxForce: 0.06, perceptionRadius: 70, separationRadius: 28, fleeRadius: 110, avoidRadius: 45, cohesionWeight: 1.2, alignmentWeight: 0.8, separationWeight: 1.4, fleeWeight: 1.8, seekWeight: 1.1, avoidWeight: 2.9, canMob: true, mobThreshold: 5, mobWeight: 2.5, ...reproductionConfig };
+const predatorConfig = { color: '#f07167', maxSpeed: 4.5, maxForce: 0.12, perceptionRadius: 200, separationRadius: 50, killRadius: 8, seekWeight: 1.8, separationWeight: 2.0, intimidationThreshold: 6, fleeWeight: 3.0 };
+
+// --- 初始化 ---
+const NUM_BOIDS_PER_FLOCK = 70;
+let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombstones = [];
+let initialCountA = 0, initialCountB = 0, initialCountC = 0;
+const w = () => canvas.width, h = () => canvas.height;
+const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
+
+function initialize() {
+    flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = [];
+    for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
+    for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
+    for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
+    for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
+    initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
+}
+
+// --- 动画循环 ---
+function animate() {
+    ctx.fillStyle = 'rgba(13, 17, 23, 0.25)'; ctx.fillRect(0, 0, w(), h());
+    
+    let newborns = [];
+    allBoids.forEach(boid => {
+        let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC;
+        boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget);
+        boid.update();
+        boid.edges();
+        boid.draw(ctx);
+        const newborn = boid.handleReproduction(ownFlock);
+        if (newborn) { newborns.push(newborn); }
+    });
+    
+    // 将新生儿添加到模拟中
+    newborns.forEach(nb => {
+        allBoids.push(nb);
+        if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; }
+        else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; }
+        else { flockC.push(nb); initialCountC++; }
+    });
+
+    predators.forEach(predator => {
+        predator.applyBehaviors(allBoids, predators);
+        predator.update(); predator.edges(); predator.draw(ctx);
+        for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } }
+    });
+    
+    flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
+    tombstones.forEach(t => t.draw(ctx));
+    tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
+
+    if (initialCountA > 0) percentAEl.innerText = `${Math.round((flockA.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
+    if (initialCountB > 0) percentBEl.innerText = `${Math.round((flockB.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
+    if (initialCountC > 0) percentCEl.innerText = `${Math.round((flockC.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
+
+    requestAnimationFrame(animate);
+}
+
+// --- 事件监听器 ---
+canvas.addEventListener('mousedown', e => { mouseTarget = new Vector(e.clientX, e.clientY); if(targetTimeout) clearTimeout(targetTimeout); targetTimeout = setTimeout(()=> {mouseTarget = null;}, 5000); });
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+// 启动
+initialize();
+animate();
+</script>
+</body>
+</html>
