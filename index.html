@@ -12,10 +12,9 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
             cursor: pointer;
             
-            /* --- 新增/修改: 优化移动端点击效果 --- */
-            -webkit-tap-highlight-color: transparent; /* 核心：移除移动端点击时的默认高亮效果 */
-            user-select: none; /* 推荐：防止用户误触时选中页面元素 */
-            outline: none; /* 推荐：移除元素获取焦点时的默认轮廓 */
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            outline: none;
         }
         canvas { display: block; }
         .info { position: absolute; top: 10px; left: 10px; padding: 12px; background-color: rgba(0,0,0,0.7); border-radius: 5px; font-size: 14px; pointer-events: none; min-width: 230px; }
@@ -66,15 +65,9 @@ class Agent {
 // --- Boid 类 ---
 class Boid extends Agent {
     constructor(x, y, config) {
-        super(x, y, config);
-        this.birthingUrge = 0;
-        this.awarenessEndTime = 0;
+        super(x, y, config); this.birthingUrge = 0; this.awarenessEndTime = 0;
     }
-    
-    showAwarenessIndicator(duration = 1500) {
-        this.awarenessEndTime = Date.now() + duration;
-    }
-
+    showAwarenessIndicator(duration = 1500) { this.awarenessEndTime = Date.now() + duration; }
     applyBehaviors(allBoids, ownFlock, predators, obstacles, target) {
         if (!this.isAlive) return;
         const avoid = this.avoid(obstacles).mult(this.config.avoidWeight);
@@ -89,7 +82,6 @@ class Boid extends Agent {
         } else { this.acceleration.add(this.flee(predators).mult(this.config.fleeWeight)); }
         if (target && Vector.dist(this.position, target) < MOUSE_INFLUENCE_RADIUS) { this.acceleration.add(this.seek(target).mult(this.config.seekWeight)); }
     }
-
     handleReproduction(ownFlock) {
         if (!this.config.canReproduce) return null;
         let closeMates = 0;
@@ -97,13 +89,10 @@ class Boid extends Agent {
         if (closeMates >= this.config.reproductionThreshold) { this.birthingUrge += 0.5; } else { this.birthingUrge = Math.max(0, this.birthingUrge - 1); }
         if (this.birthingUrge >= this.config.reproductionUrgeMax) {
             this.birthingUrge = 0;
-            if (Math.random() < this.config.reproductionChance) {
-                return new Boid(this.position.x, this.position.y, this.config);
-            }
+            if (Math.random() < this.config.reproductionChance) { return new Boid(this.position.x, this.position.y, this.config); }
         }
         return null;
     }
-
     mob(predators) { let s = new Vector(); let t=0; for (let p of predators) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(p.position,this.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*1.5); } return s; }
     flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(this.position,p.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
     avoid(obstacles) { let s = new Vector(); for (let o of obstacles) { let d=Vector.dist(this.position,o.position); if (d < this.config.avoidRadius) { let diff = Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff);}} if (s.mag()>0) { s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
@@ -111,38 +100,16 @@ class Boid extends Agent {
     separation(allBoids) { let s = new Vector(); let t=0; for (let o of allBoids) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
     alignment(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.velocity); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
     cohesion(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.position); t++; }} if (t>0) { s.div(t); s.sub(this.position); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
-    
     draw(ctx) {
         if (this.isAlive && this.awarenessEndTime > Date.now()) {
             const timeLeft = this.awarenessEndTime - Date.now();
             const fadeDuration = 500;
-            let opacity = 1;
-            if (timeLeft < fadeDuration) {
-                opacity = timeLeft / fadeDuration;
-            }
-            ctx.save();
-            ctx.translate(this.position.x, this.position.y);
-            ctx.font = 'bold 14px sans-serif';
-            ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`;
-            ctx.textAlign = 'center';
-            ctx.fillText('!', 0, -12);
-            ctx.restore();
+            let opacity = (timeLeft < fadeDuration) ? (timeLeft / fadeDuration) : 1;
+            ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`; ctx.textAlign = 'center'; ctx.fillText('!', 0, -12); ctx.restore();
         }
-
         if (!this.isAlive) { this.drawTombstone(ctx); return; }
-        ctx.save();
-        ctx.translate(this.position.x, this.position.y);
-        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
-        ctx.beginPath();
-        ctx.moveTo(10, 0);
-        ctx.lineTo(-5, -5);
-        ctx.lineTo(-5, 5);
-        ctx.closePath();
-        ctx.fillStyle = this.config.color;
-        ctx.fill();
-        ctx.restore();
+        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore();
     }
-
     drawTombstone(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.strokeStyle = '#666'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); ctx.restore(); }
 }
 
@@ -162,24 +129,47 @@ class Predator extends Agent {
     draw(ctx) { if(!this.isAlive) return; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-7, -7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
 }
 
+// --- 背景鱼类 ---
+class BackgroundFish extends Agent {
+    constructor(x, y, config) { super(x, y, config); this.wanderAngle = Math.random() * Math.PI * 2; }
+    update() {
+        this.wanderAngle += (Math.random() - 0.5) * 0.3;
+        const wanderForce = new Vector(Math.cos(this.wanderAngle), Math.sin(this.wanderAngle));
+        wanderForce.mult(0.05); this.acceleration.add(wanderForce); super.update();
+    }
+    draw(ctx) {
+        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+        ctx.beginPath(); ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore();
+    }
+}
+
 // --- 主程序 ---
 const canvas = document.getElementById('boidsCanvas'), ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 let mouseTarget = null, targetTimeout = null;
 const MOUSE_INFLUENCE_RADIUS = 250;
-let clickWaves = [];
+let clickWaves = [], animationTime = 0, audioInitialized = false;
 
 // --- 音频对象 ---
-const soundA = new Audio('sound/a.mp3');
-const soundB = new Audio('sound/b.mp3');
-const soundC = new Audio('sound/c.mp3');
-const sounds = [soundA, soundB, soundC];
-sounds.forEach(sound => sound.volume = 0);
+// 点击音效
+const soundA = new Audio('sound/a.mp3'), soundB = new Audio('sound/b.mp3'), soundC = new Audio('sound/c.mp3');
+const clickSounds = [soundA, soundB, soundC];
+clickSounds.forEach(sound => sound.volume = 0);
+// 生育音效
+const birthSoundA = new Audio('sound/a.mp3'), birthSoundB = new Audio('sound/b.mp3'), birthSoundC = new Audio('sound/c.mp3');
+const birthSounds = [birthSoundA, birthSoundB, birthSoundC];
+birthSounds.forEach(sound => sound.volume = 0);
+// 交互环境音
+const ambienceSoundA = new Audio('sound/a.mp3'), ambienceSoundB = new Audio('sound/b.mp3'), ambienceSoundC = new Audio('sound/c.mp3');
+const ambienceSounds = [ambienceSoundA, ambienceSoundB, ambienceSoundC];
+ambienceSounds.forEach(sound => { sound.volume = 0; sound.loop = true; });
 
 // --- 音量控制参数 ---
-const MIN_GLOBAL_VOLUME = 0.15;
-const MAX_GLOBAL_VOLUME = 1.0;
-const BOIDS_FOR_MAX_VOLUME = 30;
+const MIN_GLOBAL_VOLUME = 0.15, MAX_GLOBAL_VOLUME = 1.0, BOIDS_FOR_MAX_VOLUME = 30;
+// 生育音效参数
+const MIN_BIRTH_VOLUME = 0.05, MAX_BIRTH_VOLUME = 0.4, BABIES_FOR_MAX_BIRTH_VOLUME = 5;
+// 交互音效参数
+const MEETING_RADIUS = 70, MIN_BOIDS_FOR_MEETING = 10, MAX_INTERACTION_VOLUME = 0.35, BOIDS_FOR_MAX_INTERACTION_VOLUME = 50;
 
 // --- 配置区域 ---
 const reproductionConfig = { canReproduce: true, reproductionRadius: 20, reproductionThreshold: 3, reproductionUrgeMax: 100, reproductionChance: 0.30 };
@@ -187,73 +177,127 @@ const flockA_Config = { color: '#4f8a8b', maxSpeed: 3.5, maxForce: 0.05, percept
 const flockB_Config = { color: '#ffcb74', maxSpeed: 4.0, maxForce: 0.07, perceptionRadius: 60, separationRadius: 30, fleeRadius: 120, avoidRadius: 50, cohesionWeight: 0.8, alignmentWeight: 1.2, separationWeight: 1.3, fleeWeight: 2.0, seekWeight: 1.0, avoidWeight: 2.8, canMob: false, ...reproductionConfig };
 const flockC_Config = { color: '#a374ff', maxSpeed: 3.8, maxForce: 0.06, perceptionRadius: 70, separationRadius: 28, fleeRadius: 110, avoidRadius: 45, cohesionWeight: 1.2, alignmentWeight: 0.8, separationWeight: 1.4, fleeWeight: 1.8, seekWeight: 1.1, avoidWeight: 2.9, canMob: true, mobThreshold: 5, mobWeight: 2.5, ...reproductionConfig };
 const predatorConfig = { color: '#f07167', maxSpeed: 4.5, maxForce: 0.12, perceptionRadius: 200, separationRadius: 50, killRadius: 8, seekWeight: 1.8, separationWeight: 2.0, intimidationThreshold: 6, fleeWeight: 3.0 };
+// 背景鱼配置
+const NUM_BACKGROUND_FISH = 25;
+const BACKGROUND_FISH_COLORS = ['#3a506b', '#5c6e81', '#1c2541', '#0b132b'];
+const backgroundFishConfig = { maxSpeed: 1, maxForce: 0.03 };
 
 // --- 初始化 ---
 const NUM_BOIDS_PER_FLOCK = 70;
-let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombstones = [];
+let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombstones = [], backgroundFish = [];
 let initialCountA = 0, initialCountB = 0, initialCountC = 0;
 const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
 
 function initialize() {
-    flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = [];
+    flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = [];
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
     for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
+    for (let i = 0; i < NUM_BACKGROUND_FISH; i++) {
+        const color = BACKGROUND_FISH_COLORS[Math.floor(Math.random() * BACKGROUND_FISH_COLORS.length)];
+        const config = { ...backgroundFishConfig, color: color };
+        backgroundFish.push(new BackgroundFish(Math.random() * w(), Math.random() * h(), config));
+    }
     initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
+}
+
+// --- 绘制水波纹背景 ---
+function drawBackgroundEffect(ctx, time) {
+    const gridSpacing = 60, waveAmplitude = 2.5, waveFrequency = 0.04;
+    ctx.save(); ctx.strokeStyle = 'rgba(40, 50, 60, 0.3)'; ctx.lineWidth = 1;
+    for (let x = 0; x < w() + gridSpacing; x += gridSpacing) {
+        ctx.beginPath();
+        for (let y = 0; y < h(); y++) {
+            const offsetX = Math.sin(y * waveFrequency + time) * waveAmplitude;
+            (y === 0) ? ctx.moveTo(x + offsetX, y) : ctx.lineTo(x + offsetX, y);
+        }
+        ctx.stroke();
+    }
+    for (let y = 0; y < h() + gridSpacing; y += gridSpacing) {
+        ctx.beginPath();
+        for (let x = 0; x < w(); x++) {
+            const offsetY = Math.sin(x * waveFrequency + time) * waveAmplitude;
+            (x === 0) ? ctx.moveTo(x, y + offsetY) : ctx.lineTo(x, y + offsetY);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
 }
 
 // --- 动画循环 ---
 function animate() {
     ctx.fillStyle = 'rgba(13, 17, 23, 0.25)'; ctx.fillRect(0, 0, w(), h());
     
+    animationTime += 0.02;
+    drawBackgroundEffect(ctx, animationTime);
+    
     const now = Date.now();
     for (let i = clickWaves.length - 1; i >= 0; i--) {
-        const wave = clickWaves[i];
-        const age = now - wave.startTime;
-        if (age > wave.duration) {
-            clickWaves.splice(i, 1);
-            continue;
-        }
+        const wave = clickWaves[i]; const age = now - wave.startTime;
+        if (age > wave.duration) { clickWaves.splice(i, 1); continue; }
         const progress = age / wave.duration;
-        const currentRadius = wave.maxRadius * progress;
-        const opacity = 1 - progress;
-        
-        ctx.beginPath();
-        ctx.arc(wave.position.x, wave.position.y, currentRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(88, 166, 255, ${opacity})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        ctx.beginPath(); ctx.arc(wave.position.x, wave.position.y, wave.maxRadius * progress, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(88, 166, 255, ${1 - progress})`; ctx.lineWidth = 2; ctx.stroke();
     }
+    
+    backgroundFish.forEach(fish => { fish.update(); fish.edges(); fish.draw(ctx); });
 
-    let newborns = [];
+    let newborns = []; let newbornCountA=0, newbornCountB=0, newbornCountC=0;
     allBoids.forEach(boid => {
         let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC;
         boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget);
-        boid.update();
-        boid.edges();
-        boid.draw(ctx);
+        boid.update(); boid.edges(); boid.draw(ctx);
         const newborn = boid.handleReproduction(ownFlock);
         if (newborn) { newborns.push(newborn); }
     });
     
     newborns.forEach(nb => {
         allBoids.push(nb);
-        if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; }
-        else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; }
-        else { flockC.push(nb); initialCountC++; }
+        if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; newbornCountA++; }
+        else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; newbornCountB++; }
+        else { flockC.push(nb); initialCountC++; newbornCountC++; }
     });
 
+    // --- 处理生育音效 ---
+    const playBirthSound = (sound, count) => {
+        if (count > 0 && audioInitialized) {
+            const volumeScale = Math.min(1.0, count / BABIES_FOR_MAX_BIRTH_VOLUME);
+            const finalVolume = MIN_BIRTH_VOLUME + volumeScale * (MAX_BIRTH_VOLUME - MIN_BIRTH_VOLUME);
+            sound.volume = finalVolume; sound.currentTime = 0; sound.play().catch(e => {});
+        }
+    };
+    playBirthSound(birthSoundA, newbornCountA); playBirthSound(birthSoundB, newbornCountB); playBirthSound(birthSoundC, newbornCountC);
+
     predators.forEach(predator => {
-        predator.applyBehaviors(allBoids, predators);
-        predator.update(); predator.edges(); predator.draw(ctx);
+        predator.applyBehaviors(allBoids, predators); predator.update(); predator.edges(); predator.draw(ctx);
         for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } }
     });
     
     flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
     tombstones.forEach(t => t.draw(ctx));
     tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
+
+    // --- 处理交互音效 ---
+    let targetAmbience = { a: 0, b: 0, c: 0 };
+    const interactionPairs = [
+        { f1: flockA, f2: flockB, k1: 'a', k2: 'b' }, { f1: flockA, f2: flockC, k1: 'a', k2: 'c' }, { f1: flockB, f2: flockC, k1: 'b', k2: 'c' }
+    ];
+    for (const pair of interactionPairs) {
+        if (pair.f1.length < MIN_BOIDS_FOR_MEETING || pair.f2.length < MIN_BOIDS_FOR_MEETING) continue;
+        const nearBoids1 = [], nearBoids2 = new Set();
+        for (const b1 of pair.f1) { let isNear = false; for (const b2 of pair.f2) { if (Vector.dist(b1.position, b2.position) < MEETING_RADIUS) { isNear = true; nearBoids2.add(b2); } } if (isNear) { nearBoids1.push(b1); } }
+        if (nearBoids1.length >= MIN_BOIDS_FOR_MEETING && nearBoids2.size >= MIN_BOIDS_FOR_MEETING) {
+            const total = nearBoids1.length + nearBoids2.size;
+            const volume = (total / BOIDS_FOR_MAX_INTERACTION_VOLUME) * MAX_INTERACTION_VOLUME;
+            targetAmbience[pair.k1] += volume; targetAmbience[pair.k2] += volume;
+        }
+    }
+    const easeFactor = 0.05;
+    ambienceSoundA.volume += (Math.min(targetAmbience.a, MAX_INTERACTION_VOLUME) - ambienceSoundA.volume) * easeFactor;
+    ambienceSoundB.volume += (Math.min(targetAmbience.b, MAX_INTERACTION_VOLUME) - ambienceSoundB.volume) * easeFactor;
+    ambienceSoundC.volume += (Math.min(targetAmbience.c, MAX_INTERACTION_VOLUME) - ambienceSoundC.volume) * easeFactor;
 
     if (initialCountA > 0) percentAEl.innerText = `${Math.round((flockA.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
     if (initialCountB > 0) percentBEl.innerText = `${Math.round((flockB.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
@@ -264,19 +308,18 @@ function animate() {
 
 // --- 事件监听器 ---
 canvas.addEventListener('mousedown', e => { 
+    if (!audioInitialized) {
+        ambienceSounds.forEach(sound => sound.play().catch(e => console.error("Ambience audio failed to start:", e)));
+        audioInitialized = true;
+    }
+
     mouseTarget = new Vector(e.clientX, e.clientY); 
     if(targetTimeout) clearTimeout(targetTimeout); 
     targetTimeout = setTimeout(()=> {mouseTarget = null;}, 5000); 
 
-    clickWaves.push({
-        position: new Vector(e.clientX, e.clientY),
-        startTime: Date.now(),
-        duration: 800,
-        maxRadius: 60,
-    });
+    clickWaves.push({ position: new Vector(e.clientX, e.clientY), startTime: Date.now(), duration: 800, maxRadius: 60, });
     
     let awareCounts = { a: 0, b: 0, c: 0 };
-    
     allBoids.forEach(boid => {
         if (boid.isAlive && Vector.dist(boid.position, mouseTarget) < MOUSE_INFLUENCE_RADIUS) {
             boid.showAwarenessIndicator();
@@ -287,26 +330,15 @@ canvas.addEventListener('mousedown', e => {
     });
 
     const totalAware = awareCounts.a + awareCounts.b + awareCounts.c;
-
     if (totalAware > 0) {
         const volumeScale = Math.min(1.0, totalAware / BOIDS_FOR_MAX_VOLUME);
         const masterVolume = MIN_GLOBAL_VOLUME + volumeScale * (MAX_GLOBAL_VOLUME - MIN_GLOBAL_VOLUME);
-
-        const finalVolumeA = masterVolume * (awareCounts.a / totalAware);
-        const finalVolumeB = masterVolume * (awareCounts.b / totalAware);
-        const finalVolumeC = masterVolume * (awareCounts.c / totalAware);
-
         const playSound = (audio, volume) => {
-            if (volume > 0.01) {
-                audio.volume = volume;
-                audio.currentTime = 0;
-                audio.play().catch(error => console.error("Audio playback failed:", error));
-            }
+            if (volume > 0.01) { audio.volume = volume; audio.currentTime = 0; audio.play().catch(e => {}); }
         };
-
-        playSound(soundA, finalVolumeA);
-        playSound(soundB, finalVolumeB);
-        playSound(soundC, finalVolumeC);
+        playSound(soundA, masterVolume * (awareCounts.a / totalAware));
+        playSound(soundB, masterVolume * (awareCounts.b / totalAware));
+        playSound(soundC, masterVolume * (awareCounts.c / totalAware));
     }
 });
 window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
