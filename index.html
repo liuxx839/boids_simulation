@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <title>Boids终极生态模型：繁衍与生命周期</title>
+    <title>Boids终极生态模型：繁衍、生命周期与环境灾害</title>
     <style>
         body {
             margin: 0;
@@ -41,6 +41,13 @@
     <canvas id="boidsCanvas"></canvas>
 
 <script>
+// --- 图像加载 ---
+const imageA = new Image(); imageA.src = 'image/a.png';
+const imageB = new Image(); imageB.src = 'image/b.png';
+const imageC = new Image(); imageC.src = 'image/c.png';
+const imagePredator = new Image(); imagePredator.src = 'image/predators.png';
+const imageBackground = new Image(); imageBackground.src = 'image/background.jpg';
+
 // --- 向量类 ---
 class Vector {
     constructor(x = 0, y = 0) { this.x = x; this.y = y; }
@@ -51,6 +58,7 @@ class Vector {
     mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
     normalize() { const m = this.mag(); if (m > 0) this.div(m); return this; }
     limit(max) { if (this.mag() > max) this.normalize().mult(max); return this; }
+    clone() { return new Vector(this.x, this.y); }
     static dist(v1, v2) { const dx = v1.x - v2.x; const dy = v1.y - v2.y; return Math.sqrt(dx * dx + dy * dy); }
     static sub(v1, v2) { return new Vector(v1.x - v2.x, v1.y - v2.y); }
     static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
@@ -90,9 +98,10 @@ class Agent {
 class Boid extends Agent {
     constructor(x, y, config) { super(x, y, config); this.birthingUrge = 0; this.awarenessEndTime = 0; }
     showAwarenessIndicator(duration = 1500) { this.awarenessEndTime = Date.now() + duration; }
-    applyBehaviors(allBoids, ownFlock, predators, obstacles, target, whirlpools) {
+    applyBehaviors(allBoids, ownFlock, predators, obstacles, target, whirlpools, volcanoes) {
         if (!this.isAlive) return;
-        const avoid = this.avoid(obstacles).mult(this.config.avoidWeight);
+        const allObstacles = [...obstacles, ...volcanoes];
+        const avoid = this.avoid(allObstacles).mult(this.config.avoidWeight);
         const sep = this.separation(allBoids).mult(this.config.separationWeight);
         const ali = this.alignment(ownFlock).mult(this.config.alignmentWeight);
         const coh = this.cohesion(ownFlock).mult(this.config.cohesionWeight);
@@ -115,7 +124,32 @@ class Boid extends Agent {
     }
     mob(predators) { let s = new Vector(); let t=0; for (let p of predators) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(p.position,this.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*1.5); } return s; }
     flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(this.position,p.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
-    avoid(obstacles) { let s = new Vector(); for (let o of obstacles) { let d=Vector.dist(this.position,o.position); if (d < this.config.avoidRadius) { let diff = Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff);}} if (s.mag()>0) { s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
+    
+    avoid(obstacles) {
+        let steering = new Vector();
+        for (let o of obstacles) {
+            // 如果障碍物有致命半径（如火山），就用它来计算规避；否则用Boid自己的规避半径
+            // 添加一个小的安全边际(15)，这样它们会在刚好进入危险区之前开始躲避
+            const dangerRadius = (o.lethalRadius || 0) > 0 ? o.lethalRadius + 15 : this.config.avoidRadius;
+            const d = Vector.dist(this.position, o.position);
+
+            if (d > 0 && d < dangerRadius) {
+                let diff = Vector.sub(this.position, o.position);
+                // 距离越近，推力越强
+                diff.div(d * d); 
+                steering.add(diff);
+            }
+        }
+
+        if (steering.mag() > 0) {
+            steering.normalize();
+            steering.mult(this.config.maxSpeed);
+            steering.sub(this.velocity);
+            steering.limit(this.config.maxForce * 4.5); // 稍微增强规避的力量
+        }
+        return steering;
+    }
+
     seek(target) { let d = Vector.sub(target, this.position); d.normalize().mult(this.config.maxSpeed); return Vector.sub(d, this.velocity).limit(this.config.maxForce*1.5); }
     separation(allBoids) { let s = new Vector(); let t=0; for (let o of allBoids) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
     alignment(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.velocity); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
@@ -123,7 +157,26 @@ class Boid extends Agent {
     draw(ctx) {
         if (this.isAlive && this.awarenessEndTime > Date.now()) { const timeLeft = this.awarenessEndTime - Date.now(), fadeDuration = 500; let opacity = (timeLeft < fadeDuration) ? (timeLeft / fadeDuration) : 1; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`; ctx.textAlign = 'center'; ctx.fillText('!', 0, -12); ctx.restore(); }
         if (!this.isAlive) { this.drawTombstone(ctx); return; }
-        ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore();
+        
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+        if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
+            const imgWidth = 22;
+            const imgHeight = 22;
+            ctx.drawImage(this.config.image, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(10, 0);
+            ctx.lineTo(-5, -5);
+            ctx.lineTo(-5, 5);
+            ctx.closePath();
+            ctx.fillStyle = this.config.color;
+            ctx.fill();
+        }
+
+        ctx.restore();
     }
     drawTombstone(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.strokeStyle = '#666'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); ctx.restore(); }
 }
@@ -131,27 +184,66 @@ class Boid extends Agent {
 // --- Predator 类 ---
 class Predator extends Agent {
     constructor(x, y, config) { super(x, y, config); }
-    applyBehaviors(allBoids, otherPredators, whirlpools) {
+    applyBehaviors(allBoids, otherPredators, whirlpools, volcanoes) {
         if (!this.isAlive) return;
         let attackers = [];
         for (let boid of allBoids) { if (Vector.dist(this.position, boid.position) < this.config.perceptionRadius) { let toPredator = Vector.sub(this.position, boid.position).normalize(); let boidDir = boid.velocity.mag() > 0 ? new Vector(boid.velocity.x, boid.velocity.y).normalize() : new Vector(); if (Vector.dot(toPredator, boidDir) > 0.8) { attackers.push(boid); } } }
         if (attackers.length > this.config.intimidationThreshold) { this.acceleration.add(this.flee(attackers).mult(this.config.fleeWeight)); } else { this.acceleration.add(this.seek(allBoids).mult(this.config.seekWeight)); }
         this.acceleration.add(this.separation(otherPredators).mult(this.config.separationWeight));
+        this.acceleration.add(this.avoid(volcanoes).mult(4.0));
         this.applyWhirlpoolForce(whirlpools);
     }
+    avoid(obstacles) { let s = new Vector(); for (let o of obstacles) { let d=Vector.dist(this.position,o.position); if (d < (o.lethalRadius || 0) + 80) { let diff = Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff);}} if (s.mag()>0) { s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*4); } return s; }
     flee(threats) { let s = new Vector(); let t=0; for (let p of threats) { s.add(Vector.sub(this.position,p.position)); t++; } if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*2); } return s; }
     seek(prey) { let closestDist = Infinity; let closestPrey = null; for (let b of prey) { if (b.isAlive && Vector.dist(this.position, b.position) < this.config.perceptionRadius) { let d = Vector.dist(this.position, b.position); if (d < closestDist) { closestDist = d; closestPrey = b; } } } if (closestPrey) { let d = Vector.sub(closestPrey.position, this.position); d.normalize().mult(this.config.maxSpeed); return Vector.sub(d, this.velocity).limit(this.config.maxForce); } return new Vector(); }
     separation(otherPredators) { let s = new Vector(); let t=0; for (let o of otherPredators) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
-    draw(ctx) { if(!this.isAlive) return; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-7, -7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
+    draw(ctx) {
+        if(!this.isAlive) return;
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+        if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
+            const imgWidth = 35;
+            const imgHeight = 35;
+            ctx.drawImage(this.config.image, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-7, -7);
+            ctx.lineTo(-7, 7);
+            ctx.closePath();
+            ctx.fillStyle = this.config.color;
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
 }
 
 // --- 背景鱼类 ---
 class BackgroundFish extends Agent {
     constructor(x, y, config) { super(x, y, config); this.wanderAngle = Math.random() * Math.PI * 2; }
-    update(whirlpools) {
+    update(whirlpools, volcanoes) {
         this.wanderAngle += (Math.random() - 0.5) * 0.3;
         const wanderForce = new Vector(Math.cos(this.wanderAngle), Math.sin(this.wanderAngle));
         wanderForce.mult(0.05); this.acceleration.add(wanderForce);
+        
+        let avoidForce = new Vector();
+        for(const v of volcanoes) {
+            const dist = Vector.dist(this.position, v.position);
+            if (dist < v.lethalRadius + 50) {
+                let diff = Vector.sub(this.position, v.position);
+                diff.div(dist * dist);
+                avoidForce.add(diff);
+            }
+        }
+        if (avoidForce.mag() > 0) {
+            avoidForce.normalize().mult(this.config.maxSpeed);
+            avoidForce.sub(this.velocity).limit(this.config.maxForce * 5);
+            this.acceleration.add(avoidForce);
+        }
+
         this.applyWhirlpoolForce(whirlpools);
         super.update();
     }
@@ -162,7 +254,6 @@ class BackgroundFish extends Agent {
 class Whirlpool {
     constructor(x, y) {
         this.position = new Vector(x, y);
-        // --- 核心修改: 显著增大速度乘数,使移动效果可见 ---
         this.velocity = new Vector(Math.random() - 0.5, Math.random() - 0.5).mult(2.2); 
         this.creationTime = Date.now();
         this.isAlive = true;
@@ -203,15 +294,116 @@ class Whirlpool {
     }
 }
 
+// --- 海底火山类 ---
+class Volcano {
+    constructor(x, y) {
+        this.position = new Vector(x, y);
+        this.creationTime = Date.now();
+        this.isAlive = true;
+
+        const totalLife = 11000 + Math.random() * 7000;
+        this.fissureDuration = totalLife * 0.25;
+        this.lavaDuration = totalLife * 0.5;
+        this.coolDuration = totalLife * 0.25;
+        this.endTime = this.creationTime + totalLife;
+
+        this.maxLethalRadius = 50 + Math.random() * 20;
+        this.lethalRadius = 0;
+        
+        this.fissureLength = 300 + Math.random() * 100;
+        this.influenceRadius = 150;
+        this.displacementStrength = 0;
+        this.heatStrength = 0;
+
+        this.angle = (Math.random() - 0.5) * Math.PI * 0.8;
+        
+        this.particles = [];
+         for(let i=0; i<50; i++) {
+            this.particles.push({
+                pos: this.position.clone(),
+                vel: new Vector(Math.random() * 2 - 1, -Math.random() * 3),
+                life: Math.random(),
+                size: Math.random() * 2.5 + 1
+            });
+        }
+    }
+
+    update() {
+        const now = Date.now();
+        if (now > this.endTime) {
+            this.isAlive = false;
+            return;
+        }
+        const age = now - this.creationTime;
+        
+        let progress;
+        if (age < this.fissureDuration) {
+            progress = age / this.fissureDuration;
+            this.lethalRadius = 0;
+            this.displacementStrength = 25 * progress;
+            this.heatStrength = progress;
+        } else if (age < this.fissureDuration + this.lavaDuration) {
+            progress = (age - this.fissureDuration) / this.lavaDuration;
+            const pulse = progress < 0.8 ? (progress / 0.8) : 1;
+            this.lethalRadius = this.maxLethalRadius * pulse;
+            this.displacementStrength = 25 + 35 * pulse;
+            this.heatStrength = 1.0;
+        } else {
+            progress = (age - this.fissureDuration - this.lavaDuration) / this.coolDuration;
+            this.lethalRadius = this.maxLethalRadius * (1 - progress);
+            this.displacementStrength = 60 * (1 - progress);
+            this.heatStrength = 1 - progress;
+        }
+
+        this.particles.forEach(p => {
+            p.pos.add(p.vel);
+            p.vel.y += 0.03;
+            p.life -= 0.015;
+            if(p.life <= 0) {
+                const randomPosOnFissure = new Vector( (Math.random() - 0.5) * this.fissureLength, 0);
+                const rotatedPos = new Vector(
+                    randomPosOnFissure.x * Math.cos(this.angle) - randomPosOnFissure.y * Math.sin(this.angle),
+                    randomPosOnFissure.x * Math.sin(this.angle) + randomPosOnFissure.y * Math.cos(this.angle)
+                );
+                p.pos = this.position.clone().add(rotatedPos);
+                p.vel = new Vector(Math.random() * 1 - 0.5, -Math.random() * 2.5 * this.heatStrength);
+                p.life = Math.random() * 0.5 + 0.5;
+            }
+        });
+    }
+
+    draw(ctx) {
+        if (!this.isAlive) return;
+        ctx.save();
+        this.particles.forEach(p => {
+            if (p.life > 0) {
+                 const heat = this.heatStrength;
+                 const alpha = p.life * 0.6 * heat;
+                 ctx.fillStyle = `rgba(255, ${150 * heat}, 0, ${alpha})`;
+                 ctx.beginPath();
+                 ctx.arc(p.pos.x, p.pos.y, p.size, 0, Math.PI * 2);
+                 ctx.fill();
+            }
+        });
+        ctx.restore();
+    }
+}
+
+
 // --- 主程序 ---
 const canvas = document.getElementById('boidsCanvas'), ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 let mouseTarget = null, targetTimeout = null;
 const MOUSE_INFLUENCE_RADIUS = 250;
 let clickWaves = [], animationTime = 0, audioInitialized = false;
+
 let whirlpools = [];
 const MAX_WHIRLPOOLS = 1;
-const WHIRLPOOL_SPAWN_CHANCE = 0.02; 
+const WHIRLPOOL_SPAWN_CHANCE = 0.002;
+
+let volcanoes = [];
+const MAX_VOLCANOES = 1;
+const VOLCANO_SPAWN_CHANCE = 0.0015;
 
 // --- 音频对象 ---
 const soundA = new Audio('sound/a.mp3'), soundB = new Audio('sound/b.mp3'), soundC = new Audio('sound/c.mp3');
@@ -228,10 +420,10 @@ const MEETING_RADIUS = 70, MIN_BOIDS_FOR_MEETING = 10, MAX_INTERACTION_VOLUME = 
 
 // --- 配置区域 ---
 const reproductionConfig = { canReproduce: true, reproductionRadius: 20, reproductionThreshold: 3, reproductionUrgeMax: 100, reproductionChance: 0.05 };
-const flockA_Config = { color: '#4f8a8b', maxSpeed: 3.5, maxForce: 0.05, perceptionRadius: 50, separationRadius: 25, fleeRadius: 100, avoidRadius: 40, cohesionWeight: 1.0, alignmentWeight: 1.0, separationWeight: 1.5, fleeWeight: 2.5, seekWeight: 1.2, avoidWeight: 3.0, canMob: false, ...reproductionConfig };
-const flockB_Config = { color: '#ffcb74', maxSpeed: 4.0, maxForce: 0.07, perceptionRadius: 60, separationRadius: 30, fleeRadius: 120, avoidRadius: 50, cohesionWeight: 0.8, alignmentWeight: 1.2, separationWeight: 1.3, fleeWeight: 2.0, seekWeight: 1.0, avoidWeight: 2.8, canMob: false, ...reproductionConfig };
-const flockC_Config = { color: '#a374ff', maxSpeed: 3.8, maxForce: 0.06, perceptionRadius: 70, separationRadius: 28, fleeRadius: 110, avoidRadius: 45, cohesionWeight: 1.2, alignmentWeight: 0.8, separationWeight: 1.4, fleeWeight: 1.8, seekWeight: 1.1, avoidWeight: 2.9, canMob: true, mobThreshold: 5, mobWeight: 2.5, ...reproductionConfig };
-const predatorConfig = { color: '#f07167', maxSpeed: 4.5, maxForce: 0.12, perceptionRadius: 200, separationRadius: 50, killRadius: 8, seekWeight: 1.8, separationWeight: 2.0, intimidationThreshold: 6, fleeWeight: 3.0 };
+const flockA_Config = { image: imageA, color: '#4f8a8b', maxSpeed: 3.5, maxForce: 0.05, perceptionRadius: 50, separationRadius: 25, fleeRadius: 100, avoidRadius: 50, cohesionWeight: 1.0, alignmentWeight: 1.0, separationWeight: 1.5, fleeWeight: 2.5, seekWeight: 1.2, avoidWeight: 3.5, canMob: false, ...reproductionConfig };
+const flockB_Config = { image: imageB, color: '#ffcb74', maxSpeed: 4.0, maxForce: 0.07, perceptionRadius: 60, separationRadius: 30, fleeRadius: 120, avoidRadius: 60, cohesionWeight: 0.8, alignmentWeight: 1.2, separationWeight: 1.3, fleeWeight: 2.0, seekWeight: 1.0, avoidWeight: 3.3, canMob: false, ...reproductionConfig };
+const flockC_Config = { image: imageC, color: '#a374ff', maxSpeed: 3.8, maxForce: 0.06, perceptionRadius: 70, separationRadius: 28, fleeRadius: 110, avoidRadius: 55, cohesionWeight: 1.2, alignmentWeight: 0.8, separationWeight: 1.4, fleeWeight: 1.8, seekWeight: 1.1, avoidWeight: 3.4, canMob: true, mobThreshold: 5, mobWeight: 2.5, ...reproductionConfig };
+const predatorConfig = { image: imagePredator, color: '#f07167', maxSpeed: 4.5, maxForce: 0.12, perceptionRadius: 200, separationRadius: 50, killRadius: 8, seekWeight: 1.8, separationWeight: 2.0, intimidationThreshold: 6, fleeWeight: 3.0 };
 const NUM_BACKGROUND_FISH = 25, BACKGROUND_FISH_COLORS = ['#3a506b', '#5c6e81', '#1c2541', '#0b132b'], backgroundFishConfig = { maxSpeed: 1, maxForce: 0.03 };
 
 // --- 初始化 ---
@@ -242,7 +434,7 @@ const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
 
 function initialize() {
-    flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = []; whirlpools = [];
+    flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = []; whirlpools = []; volcanoes = [];
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
@@ -252,51 +444,94 @@ function initialize() {
 }
 
 // --- 背景绘制函数 ---
-function getDistortion(x, y, whirlpool) {
-    if (!whirlpool) return { x, y };
+function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
+    const gridSpacing = 60;
+    const waveAmplitude = 2.5;
+    const waveFrequency = 0.04;
+    const heatColor = [255, 120, 0];
+    const defaultGridColor = [60, 80, 100];
 
-    const currentRadius = whirlpool.baseRadius * whirlpool.lifeCycleProgress;
-    const toPoint = Vector.sub(new Vector(x, y), whirlpool.position);
-    const dist = toPoint.mag();
+    const lerp = (a, b, t) => a + (b - a) * t;
 
-    if (dist >= currentRadius) return { x, y };
+    function getDistortionData(x, y) {
+        let finalPoint = new Vector(x, y);
+        let heat = 0;
+
+        for(const w of whirlpools) {
+            const currentRadius = w.baseRadius * w.lifeCycleProgress;
+            const toPoint = Vector.sub(finalPoint, w.position);
+            const dist = toPoint.mag();
+
+            if (dist > 0 && dist < currentRadius) {
+                const progress = dist / currentRadius;
+                const swirlAngle = (1 - progress) * w.baseStrength * 2.5 * w.lifeCycleProgress;
+                const pinchAmount = dist * (1 - progress) * 0.2;
+                
+                const angle = Math.atan2(toPoint.y, toPoint.x);
+                const finalAngle = angle + swirlAngle;
+                const finalDist = dist - pinchAmount;
+                finalPoint.x = w.position.x + Math.cos(finalAngle) * finalDist;
+                finalPoint.y = w.position.y + Math.sin(finalAngle) * finalDist;
+            }
+        }
+        
+        for(const v of volcanoes) {
+             const toPoint = Vector.sub(finalPoint, v.position);
+             const distToCenter = toPoint.mag();
+
+             if (distToCenter < v.influenceRadius + v.fissureLength / 2) {
+                const cosA = Math.cos(-v.angle);
+                const sinA = Math.sin(-v.angle);
+                const localX = toPoint.x * cosA - toPoint.y * sinA;
+                const localY = toPoint.x * sinA + toPoint.y * cosA;
+
+                if (Math.abs(localX) < v.fissureLength / 2 && Math.abs(localY) < v.influenceRadius) {
+                    const falloff = 1 - Math.abs(localY) / v.influenceRadius;
+                    const displacement = v.displacementStrength * falloff * Math.sign(localY);
+                    
+                    const worldDispX = 0 * cosA - displacement * sinA;
+                    const worldDispY = 0 * sinA + displacement * cosA;
+                    finalPoint.x -= worldDispX;
+                    finalPoint.y -= worldDispY;
+
+                    heat = Math.max(heat, v.heatStrength * falloff);
+                }
+             }
+        }
+        return { point: finalPoint, heat: heat };
+    }
     
-    const progress = dist / currentRadius;
-    const swirlAngle = (1 - progress) * whirlpool.baseStrength * 2.5;
-    const pinchAmount = dist * (1 - progress) * 0.2;
-
-    const angle = Math.atan2(toPoint.y, toPoint.x);
-    const finalAngle = angle + swirlAngle;
-
-    const finalDist = dist - pinchAmount;
-
-    return {
-        x: whirlpool.position.x + Math.cos(finalAngle) * finalDist,
-        y: whirlpool.position.y + Math.sin(finalAngle) * finalDist
-    };
-}
-function drawBackgroundEffect(ctx, time, whirlpools) {
-    const gridSpacing = 60; const waveAmplitude = 2.5; const waveFrequency = 0.04;
     ctx.save();
-    ctx.strokeStyle = 'rgba(60, 80, 100, 0.25)';
-    ctx.lineWidth = 0.75;
-    const activeWhirlpool = whirlpools[0];
+    ctx.lineWidth = 0.85;
 
     for (let x = 0; x < w() + gridSpacing; x += gridSpacing) {
         ctx.beginPath();
         for (let y = 0; y < h(); y++) {
             const offsetX = Math.sin(y * waveFrequency + time) * waveAmplitude;
-            const distorted = getDistortion(x + offsetX, y, activeWhirlpool);
-            (y === 0) ? ctx.moveTo(distorted.x, distorted.y) : ctx.lineTo(distorted.x, distorted.y);
+            const data = getDistortionData(x + offsetX, y);
+            
+            const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
+            const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
+            const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+
+            (y === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
         }
         ctx.stroke();
     }
+    
     for (let y = 0; y < h() + gridSpacing; y += gridSpacing) {
         ctx.beginPath();
         for (let x = 0; x < w(); x++) {
             const offsetY = Math.sin(x * waveFrequency + time) * waveAmplitude;
-            const distorted = getDistortion(x, y + offsetY, activeWhirlpool);
-            (x === 0) ? ctx.moveTo(distorted.x, distorted.y) : ctx.lineTo(distorted.x, distorted.y);
+            const data = getDistortionData(x, y + offsetY);
+            
+            const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
+            const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
+            const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+
+            (x === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
         }
         ctx.stroke();
     }
@@ -305,29 +540,81 @@ function drawBackgroundEffect(ctx, time, whirlpools) {
 
 // --- 动画循环 ---
 function animate() {
-    ctx.fillStyle = 'rgba(13, 17, 23, 0.25)'; ctx.fillRect(0, 0, w(), h());
+    if (imageBackground.complete && imageBackground.naturalWidth !== 0) {
+        ctx.drawImage(imageBackground, 0, 0, w(), h());
+    } else {
+        ctx.fillStyle = 'rgb(13, 17, 23)';
+        ctx.fillRect(0, 0, w(), h());
+    }
+
     animationTime += 0.02;
     
     if (Math.random() < WHIRLPOOL_SPAWN_CHANCE && whirlpools.length < MAX_WHIRLPOOLS) { whirlpools.push(new Whirlpool(Math.random() * w(), Math.random() * h())); }
     whirlpools.forEach(w => w.update());
     whirlpools = whirlpools.filter(w => w.isAlive);
     
-    drawBackgroundEffect(ctx, animationTime, whirlpools);
+    if (Math.random() < VOLCANO_SPAWN_CHANCE && volcanoes.length < MAX_VOLCANOES) { volcanoes.push(new Volcano(Math.random() * w(), Math.random() * h())); }
+    volcanoes.forEach(v => v.update());
+    
+    drawBackgroundEffect(ctx, animationTime, whirlpools, volcanoes);
+
+    volcanoes.forEach(v => v.draw(ctx));
+    volcanoes = volcanoes.filter(v => v.isAlive);
 
     const now = Date.now();
     for (let i = clickWaves.length - 1; i >= 0; i--) { const wave = clickWaves[i]; const age = now - wave.startTime; if (age > wave.duration) { clickWaves.splice(i, 1); continue; } const progress = age / wave.duration; ctx.beginPath(); ctx.arc(wave.position.x, wave.position.y, wave.maxRadius * progress, 0, Math.PI * 2); ctx.strokeStyle = `rgba(88, 166, 255, ${1 - progress})`; ctx.lineWidth = 2; ctx.stroke(); }
     
-    backgroundFish.forEach(fish => { fish.update(whirlpools); fish.edges(); fish.draw(ctx); });
+    backgroundFish.forEach(fish => { fish.update(whirlpools, volcanoes); fish.edges(); fish.draw(ctx); });
 
     let newborns = [], newbornCountA=0, newbornCountB=0, newbornCountC=0;
-    allBoids.forEach(boid => { let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC; boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget, whirlpools); boid.update(); boid.edges(); boid.draw(ctx); const newborn = boid.handleReproduction(ownFlock); if (newborn) { newborns.push(newborn); } });
+    allBoids.forEach(boid => { let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC; boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget, whirlpools, volcanoes); boid.update(); boid.edges(); boid.draw(ctx); const newborn = boid.handleReproduction(ownFlock); if (newborn) { newborns.push(newborn); } });
     
     newborns.forEach(nb => { allBoids.push(nb); if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; newbornCountA++; } else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; newbornCountB++; } else { flockC.push(nb); initialCountC++; newbornCountC++; } });
     const playBirthSound = (sound, count) => { if (count > 0 && audioInitialized) { const v = MIN_BIRTH_VOLUME + Math.min(1, count / BABIES_FOR_MAX_BIRTH_VOLUME) * (MAX_BIRTH_VOLUME - MIN_BIRTH_VOLUME); sound.volume = v; sound.currentTime = 0; sound.play().catch(e => {}); } };
     playBirthSound(birthSoundA, newbornCountA); playBirthSound(birthSoundB, newbornCountB); playBirthSound(birthSoundC, newbornCountC);
 
-    predators.forEach(predator => { predator.applyBehaviors(allBoids, predators, whirlpools); predator.update(); predator.edges(); predator.draw(ctx); for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } } });
+    predators.forEach(predator => { predator.applyBehaviors(allBoids, predators, whirlpools, volcanoes); predator.update(); predator.edges(); predator.draw(ctx); for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } } });
     
+    // *** FIX START: 改变火山杀伤逻辑，从半径检测改为粒子碰撞检测 ***
+    for (const v of volcanoes) {
+        // 只有在火山活跃喷发期（热度高）时，其粒子才具有杀伤力
+        if (v.heatStrength > 0.5) { 
+            for (const p of v.particles) {
+                // 粒子必须是存活状态
+                if (p.life > 0) {
+                    // 检查 Boids
+                    for (let i = allBoids.length - 1; i >= 0; i--) {
+                        const boid = allBoids[i];
+                        // 碰撞检测：智能体与粒子的距离 < 粒子半径 + 智能体大致半径
+                        if (boid.isAlive && Vector.dist(boid.position, p.pos) < p.size + 8) { // Boid 大致半径为 8
+                            boid.isAlive = false;
+                            boid.deathTime = Date.now();
+                            tombstones.push(boid);
+                            allBoids.splice(i, 1);
+                        }
+                    }
+                    // 检查捕食者
+                    for (let i = predators.length - 1; i >= 0; i--) {
+                        const pred = predators[i];
+                        if (pred.isAlive && Vector.dist(pred.position, p.pos) < p.size + 12) { // 捕食者体型更大，半径约 12
+                            pred.isAlive = false;
+                            predators.splice(i, 1);
+                        }
+                    }
+                    // 检查背景鱼
+                    for (let i = backgroundFish.length - 1; i >= 0; i--) {
+                        const fish = backgroundFish[i];
+                        if (fish.isAlive && Vector.dist(fish.position, p.pos) < p.size + 4) { // 背景鱼体型小，半径约 4
+                            fish.isAlive = false;
+                            backgroundFish.splice(i, 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // *** FIX END ***
+
     flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
     tombstones.forEach(t => t.draw(ctx)); tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
 
