@@ -4,37 +4,148 @@
     <meta charset="UTF-8">
     <title>Boids终极生态模型：繁衍、生命周期与环境灾害</title>
     <style>
+        :root {
+            --hud-bg: rgba(8, 14, 28, 0.52);
+            --hud-border: rgba(150, 205, 255, 0.28);
+            --hud-glow: rgba(90, 180, 255, 0.35);
+            --text-main: #d9ecff;
+            --text-soft: #aac3dc;
+        }
+
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #0d1117;
-            color: #c9d1d9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background:
+                radial-gradient(circle at 20% 10%, #1a2a41 0%, transparent 45%),
+                radial-gradient(circle at 85% 80%, #1a2538 0%, transparent 40%),
+                #04070f;
+            color: var(--text-main);
+            font-family: "Segoe UI", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            letter-spacing: 0.2px;
             cursor: pointer;
-            
             -webkit-tap-highlight-color: transparent;
             user-select: none;
             outline: none;
         }
-        canvas { display: block; }
-        .info { position: absolute; top: 10px; left: 10px; padding: 12px; background-color: rgba(0,0,0,0.7); border-radius: 5px; font-size: 14px; pointer-events: none; min-width: 230px; }
-        .info span { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
-        .info div { margin-bottom: 6px; }
-        .info hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
-        .info .highlight { color: #58a6ff; }
-        .info .danger { color: #f07167; }
-        .info .brave { color: #a374ff; }
-        .info strong { float: right; color: #fff; }
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            inset: -20%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        body::before {
+            background:
+                radial-gradient(circle at 50% 55%, transparent 42%, rgba(0, 0, 0, 0.5) 100%);
+            mix-blend-mode: multiply;
+        }
+
+        body::after {
+            background:
+                linear-gradient(120deg, rgba(80, 170, 255, 0.08), rgba(255, 120, 80, 0.04), rgba(120, 255, 245, 0.07));
+            filter: blur(26px);
+            animation: drift-glow 16s ease-in-out infinite alternate;
+            opacity: 0.55;
+        }
+
+        @keyframes drift-glow {
+            0% { transform: translate3d(-2%, -1%, 0) scale(1); }
+            100% { transform: translate3d(2%, 1.5%, 0) scale(1.08); }
+        }
+
+        canvas {
+            position: relative;
+            z-index: 2;
+            display: block;
+            filter: saturate(1.1) contrast(1.05);
+        }
+
+        .atmosphere-layer {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 3;
+            background:
+                radial-gradient(circle at 12% 20%, rgba(140, 210, 255, 0.11), transparent 36%),
+                radial-gradient(circle at 85% 14%, rgba(116, 158, 255, 0.09), transparent 32%),
+                radial-gradient(circle at 52% 100%, rgba(120, 255, 220, 0.06), transparent 45%);
+            animation: breathe 10s ease-in-out infinite;
+        }
+
+        @keyframes breathe {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 0.9; }
+        }
+
+        .info {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 4;
+            min-width: 260px;
+            padding: 14px 15px;
+            border-radius: 14px;
+            border: 1px solid var(--hud-border);
+            background: linear-gradient(160deg, rgba(18, 30, 56, 0.72), rgba(7, 14, 26, 0.54));
+            box-shadow:
+                0 8px 40px rgba(0, 0, 0, 0.45),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+                0 0 18px var(--hud-glow);
+            backdrop-filter: blur(7px) saturate(1.2);
+            pointer-events: none;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .info-title {
+            font-size: 13px;
+            color: #e8f4ff;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            opacity: 0.92;
+        }
+
+        .info span {
+            display: inline-block;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 8px;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .info div { margin-bottom: 6px; color: var(--text-soft); }
+        .info hr {
+            border: 0;
+            border-top: 1px solid rgba(170, 200, 240, 0.25);
+            margin: 9px 0;
+        }
+        .info .highlight,
+        .info .hint { color: #7ec8ff; }
+        .info .danger { color: #ff8d8d; }
+        .info .brave { color: #c6adff; }
+        .info strong {
+            float: right;
+            color: #f5fbff;
+            text-shadow: 0 0 8px rgba(180, 225, 255, 0.5);
+        }
     </style>
 </head>
 <body>
+    <div class="atmosphere-layer"></div>
     <div class="info">
+        <div class="info-title">Deep Ocean Ecosystem</div>
         <div><span style="background-color: #4f8a8b;"></span>群组 A (普通)<strong id="percentA">100%</strong></div>
         <div><span style="background-color: #ffcb74;"></span>群组 B (高速)<strong id="percentB">100%</strong></div>
         <div class="brave"><span style="background-color: #a374ff;"></span>群组 C (会反击)<strong id="percentC">100%</strong></div>
         <div class="danger"><span style="background-color: #f07167;"></span>捕食者</div>
         <hr>
-        <div class="highlight"><strong>点击屏幕可引导Boids</strong></div>
+        <div class="hint"><strong>点击屏幕可引导 Boids</strong></div>
         <div>群体在密集时有机会繁衍</div>
         <div>墓碑障碍物会在3秒后消失</div>
     </div>
@@ -161,6 +272,10 @@ class Boid extends Agent {
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+        const speedRatio = Math.min(1, this.velocity.mag() / (this.config.maxSpeed || 1));
+        ctx.globalAlpha = 0.9 + speedRatio * 0.1;
+        ctx.shadowColor = this.config.color;
+        ctx.shadowBlur = 8 + speedRatio * 7;
 
         if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
             const imgWidth = 22;
@@ -178,7 +293,7 @@ class Boid extends Agent {
 
         ctx.restore();
     }
-    drawTombstone(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.strokeStyle = '#666'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); ctx.restore(); }
+    drawTombstone(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.strokeStyle = 'rgba(210, 220, 245, 0.7)'; ctx.shadowColor = 'rgba(170, 200, 255, 0.35)'; ctx.shadowBlur = 6; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); ctx.restore(); }
 }
 
 // --- Predator 类 ---
@@ -202,6 +317,9 @@ class Predator extends Agent {
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+        const speedRatio = Math.min(1, this.velocity.mag() / (this.config.maxSpeed || 1));
+        ctx.shadowColor = 'rgba(255, 110, 110, 0.75)';
+        ctx.shadowBlur = 10 + speedRatio * 8;
 
         if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
             const imgWidth = 35;
@@ -247,7 +365,7 @@ class BackgroundFish extends Agent {
         this.applyWhirlpoolForce(whirlpools);
         super.update();
     }
-    draw(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2); ctx.fillStyle = this.config.color; ctx.fill(); ctx.restore(); }
+    draw(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2); ctx.fillStyle = this.config.color; ctx.shadowColor = 'rgba(170, 210, 255, 0.35)'; ctx.shadowBlur = 4; ctx.fill(); ctx.restore(); }
 }
 
 // --- 水龙卷类 ---
@@ -375,6 +493,7 @@ class Volcano {
     draw(ctx) {
         if (!this.isAlive) return;
         ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
         this.particles.forEach(p => {
             if (p.life > 0) {
                  const heat = this.heatStrength;
@@ -396,6 +515,9 @@ canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 let mouseTarget = null, targetTimeout = null;
 const MOUSE_INFLUENCE_RADIUS = 250;
 let clickWaves = [], animationTime = 0, audioInitialized = false;
+const grainCanvas = document.createElement('canvas');
+const grainCtx = grainCanvas.getContext('2d');
+let grainFrameCounter = 0;
 
 let whirlpools = [];
 const MAX_WHIRLPOOLS = 1;
@@ -433,6 +555,25 @@ let initialCountA = 0, initialCountB = 0, initialCountC = 0;
 const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
 
+function resizeGrainCanvas() {
+    grainCanvas.width = Math.max(1, Math.floor(w() / 2));
+    grainCanvas.height = Math.max(1, Math.floor(h() / 2));
+    regenerateGrain();
+}
+
+function regenerateGrain() {
+    const imageData = grainCtx.createImageData(grainCanvas.width, grainCanvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        const shade = 175 + Math.random() * 80;
+        data[i] = shade;
+        data[i + 1] = shade;
+        data[i + 2] = shade;
+        data[i + 3] = Math.random() * 28;
+    }
+    grainCtx.putImageData(imageData, 0, 0);
+}
+
 function initialize() {
     flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = []; whirlpools = []; volcanoes = [];
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
@@ -441,15 +582,16 @@ function initialize() {
     for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
     for (let i = 0; i < NUM_BACKGROUND_FISH; i++) { const color = BACKGROUND_FISH_COLORS[Math.floor(Math.random() * BACKGROUND_FISH_COLORS.length)]; backgroundFish.push(new BackgroundFish(Math.random() * w(), Math.random() * h(), { ...backgroundFishConfig, color: color })); }
     initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
+    resizeGrainCanvas();
 }
 
 // --- 背景绘制函数 ---
 function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
     const gridSpacing = 60;
-    const waveAmplitude = 2.5;
+    const waveAmplitude = 3.6;
     const waveFrequency = 0.04;
-    const heatColor = [255, 120, 0];
-    const defaultGridColor = [60, 80, 100];
+    const heatColor = [255, 138, 32];
+    const defaultGridColor = [85, 120, 155];
 
     const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -513,7 +655,7 @@ function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
             const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
             const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
             const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.33)`;
 
             (y === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
         }
@@ -529,7 +671,7 @@ function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
             const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
             const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
             const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.33)`;
 
             (x === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
         }
@@ -538,16 +680,82 @@ function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
     ctx.restore();
 }
 
+function drawPostProcessingOverlay(ctx, time, target) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.42);
+    const focus = target || new Vector(
+        w() * 0.5 + Math.sin(time * 0.2) * w() * 0.12,
+        h() * 0.48 + Math.cos(time * 0.18) * h() * 0.1
+    );
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const glow = ctx.createRadialGradient(focus.x, focus.y, 0, focus.x, focus.y, Math.max(w(), h()) * 0.7);
+    glow.addColorStop(0, `rgba(140, 205, 255, ${0.1 + pulse * 0.07})`);
+    glow.addColorStop(0.45, 'rgba(90, 140, 210, 0.08)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w(), h());
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 6; i++) {
+        const baseY = (h() / 6) * i + Math.sin(time * 0.6 + i) * 26;
+        const alpha = Math.max(0.02, 0.04 + 0.03 * Math.sin(time + i * 1.5));
+        const hue = 185 + i * 7;
+        ctx.strokeStyle = `hsla(${hue}, 85%, 72%, ${alpha})`;
+        ctx.beginPath();
+        for (let x = 0; x <= w(); x += 40) {
+            const y = baseY + Math.sin(x * 0.011 + time * 1.3 + i) * 15;
+            (x === 0) ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    const vignette = ctx.createRadialGradient(
+        w() / 2, h() / 2, Math.min(w(), h()) * 0.2,
+        w() / 2, h() / 2, Math.max(w(), h()) * 0.78
+    );
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(0.65, 'rgba(0, 0, 0, 0.16)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.54)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, w(), h());
+    ctx.restore();
+
+    if (grainCanvas.width > 0 && grainCanvas.height > 0) {
+        if ((grainFrameCounter++ % 3) === 0) regenerateGrain();
+        ctx.save();
+        ctx.globalCompositeOperation = 'soft-light';
+        ctx.globalAlpha = 0.09;
+        ctx.drawImage(grainCanvas, 0, 0, w(), h());
+        ctx.restore();
+    }
+}
+
 // --- 动画循环 ---
 function animate() {
     if (imageBackground.complete && imageBackground.naturalWidth !== 0) {
         ctx.drawImage(imageBackground, 0, 0, w(), h());
     } else {
-        ctx.fillStyle = 'rgb(13, 17, 23)';
+        const fallbackGradient = ctx.createLinearGradient(0, 0, 0, h());
+        fallbackGradient.addColorStop(0, '#0b1221');
+        fallbackGradient.addColorStop(0.6, '#080f1b');
+        fallbackGradient.addColorStop(1, '#05070f');
+        ctx.fillStyle = fallbackGradient;
         ctx.fillRect(0, 0, w(), h());
     }
 
     animationTime += 0.02;
+    const ambientTint = ctx.createLinearGradient(0, 0, w(), h());
+    ambientTint.addColorStop(0, 'rgba(55, 120, 180, 0.12)');
+    ambientTint.addColorStop(0.45, 'rgba(30, 58, 100, 0.06)');
+    ambientTint.addColorStop(1, 'rgba(8, 12, 24, 0.24)');
+    ctx.fillStyle = ambientTint;
+    ctx.fillRect(0, 0, w(), h());
     
     if (Math.random() < WHIRLPOOL_SPAWN_CHANCE && whirlpools.length < MAX_WHIRLPOOLS) { whirlpools.push(new Whirlpool(Math.random() * w(), Math.random() * h())); }
     whirlpools.forEach(w => w.update());
@@ -562,7 +770,34 @@ function animate() {
     volcanoes = volcanoes.filter(v => v.isAlive);
 
     const now = Date.now();
-    for (let i = clickWaves.length - 1; i >= 0; i--) { const wave = clickWaves[i]; const age = now - wave.startTime; if (age > wave.duration) { clickWaves.splice(i, 1); continue; } const progress = age / wave.duration; ctx.beginPath(); ctx.arc(wave.position.x, wave.position.y, wave.maxRadius * progress, 0, Math.PI * 2); ctx.strokeStyle = `rgba(88, 166, 255, ${1 - progress})`; ctx.lineWidth = 2; ctx.stroke(); }
+    for (let i = clickWaves.length - 1; i >= 0; i--) {
+        const wave = clickWaves[i];
+        const age = now - wave.startTime;
+        if (age > wave.duration) {
+            clickWaves.splice(i, 1);
+            continue;
+        }
+        const progress = age / wave.duration;
+        const easeOut = 1 - Math.pow(1 - progress, 2);
+        const radius = wave.maxRadius * easeOut;
+
+        ctx.save();
+        ctx.strokeStyle = `rgba(120, 205, 255, ${(1 - progress) * 0.95})`;
+        ctx.shadowColor = 'rgba(120, 205, 255, 0.8)';
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = 2 + (1 - progress) * 1.8;
+        ctx.beginPath();
+        ctx.arc(wave.position.x, wave.position.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = `rgba(180, 232, 255, ${(1 - progress) * 0.55})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(wave.position.x, wave.position.y, radius * 0.65, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
     
     backgroundFish.forEach(fish => { fish.update(whirlpools, volcanoes); fish.edges(); fish.draw(ctx); });
 
@@ -617,6 +852,7 @@ function animate() {
 
     flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
     tombstones.forEach(t => t.draw(ctx)); tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
+    drawPostProcessingOverlay(ctx, animationTime, mouseTarget);
 
     let targetAmbience = { a: 0, b: 0, c: 0 };
     const interactionPairs = [ { f1: flockA, f2: flockB, k1: 'a', k2: 'b' }, { f1: flockA, f2: flockC, k1: 'a', k2: 'c' }, { f1: flockB, f2: flockC, k1: 'b', k2: 'c' } ];
