@@ -162,6 +162,8 @@
         <div class="danger"><span style="background-color: #f07167;"></span>捕食者</div>
         <hr>
         <div class="hint"><strong>点击屏幕可引导 Boids</strong></div>
+        <div class="highlight">视角模式<strong id="cameraModeLabel">总览</strong></div>
+        <div>按 C 切换视角 / 按 X 切换跟随鱼</div>
         <div>群体在密集时有机会繁衍</div>
         <div>墓碑障碍物会在3秒后消失</div>
     </div>
@@ -720,7 +722,11 @@ const threeState = {
     particles: null,
     targetGlow: null,
     whirlpoolMeshes: new Map(),
-    volcanoMeshes: new Map()
+    volcanoMeshes: new Map(),
+    shockwaves: [],
+    fishMeshes: null,
+    cameraMode: 'overview',
+    fishFocus: null
 };
 
 // --- 音频对象 ---
@@ -751,12 +757,39 @@ let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombst
 let initialCountA = 0, initialCountB = 0, initialCountC = 0;
 const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
+const cameraModeEl = document.getElementById('cameraModeLabel');
 
 function toThreePos(pos) {
     return {
         x: (pos.x / w() - 0.5) * 34,
         y: (0.5 - pos.y / h()) * 19
     };
+}
+
+const CAMERA_MODES = ['overview', 'orbit', 'fish'];
+const CAMERA_MODE_LABELS = { overview: '总览', orbit: '环绕', fish: '鱼视角' };
+
+function updateCameraModeLabel() {
+    if (!cameraModeEl) return;
+    cameraModeEl.innerText = CAMERA_MODE_LABELS[threeState.cameraMode] || '总览';
+}
+
+function chooseFishFocus() {
+    if (allBoids.length === 0) {
+        threeState.fishFocus = null;
+        return;
+    }
+    const alive = allBoids.filter(b => b.isAlive);
+    threeState.fishFocus = alive.length ? alive[Math.floor(Math.random() * alive.length)] : null;
+}
+
+function cycleCameraMode() {
+    const idx = CAMERA_MODES.indexOf(threeState.cameraMode);
+    threeState.cameraMode = CAMERA_MODES[(idx + 1) % CAMERA_MODES.length];
+    if (threeState.cameraMode === 'fish' && (!threeState.fishFocus || !threeState.fishFocus.isAlive)) {
+        chooseFishFocus();
+    }
+    updateCameraModeLabel();
 }
 
 function disposeHazardMeshes(map) {
@@ -829,7 +862,9 @@ function initThreeBackground() {
     threeState.renderer.domElement.style.display = 'block';
     threeContainer.innerHTML = '';
     threeContainer.appendChild(threeState.renderer.domElement);
+    createFishMeshes();
     threeState.enabled = true;
+    updateCameraModeLabel();
 }
 
 function createWhirlpoolMesh() {
@@ -873,6 +908,177 @@ function createVolcanoMesh() {
     return { group, plume, smoke };
 }
 
+function createFishMeshes() {
+    if (!threeState.scene || typeof window.THREE === 'undefined') return;
+    const THREE = window.THREE;
+    const dummy = new THREE.Object3D();
+
+    const boidGeom = new THREE.ConeGeometry(0.22, 0.72, 8);
+    boidGeom.rotateZ(-Math.PI / 2);
+    const boidMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.42,
+        metalness: 0.08,
+        emissive: 0x10263d,
+        emissiveIntensity: 0.38,
+        vertexColors: true
+    });
+    const boidMesh = new THREE.InstancedMesh(boidGeom, boidMat, MAX_TOTAL_BOIDS);
+    boidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    boidMesh.count = 0;
+
+    const boidShadowGeom = new THREE.CircleGeometry(0.22, 14);
+    const boidShadowMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false
+    });
+    const boidShadowMesh = new THREE.InstancedMesh(boidShadowGeom, boidShadowMat, MAX_TOTAL_BOIDS);
+    boidShadowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    boidShadowMesh.count = 0;
+
+    const predGeom = new THREE.ConeGeometry(0.32, 0.92, 8);
+    predGeom.rotateZ(-Math.PI / 2);
+    const predMat = new THREE.MeshStandardMaterial({
+        color: 0xff8a7f,
+        roughness: 0.5,
+        metalness: 0.06,
+        emissive: 0x391712,
+        emissiveIntensity: 0.32
+    });
+    const predMesh = new THREE.InstancedMesh(predGeom, predMat, 16);
+    predMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    predMesh.count = 0;
+
+    const predShadowGeom = new THREE.CircleGeometry(0.34, 14);
+    const predShadowMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false
+    });
+    const predShadowMesh = new THREE.InstancedMesh(predShadowGeom, predShadowMat, 16);
+    predShadowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    predShadowMesh.count = 0;
+
+    boidMesh.renderOrder = 2;
+    predMesh.renderOrder = 2;
+    boidShadowMesh.renderOrder = 1;
+    predShadowMesh.renderOrder = 1;
+
+    threeState.scene.add(boidShadowMesh, predShadowMesh, boidMesh, predMesh);
+    threeState.fishMeshes = { dummy, boidMesh, boidShadowMesh, predMesh, predShadowMesh };
+}
+
+function syncThreeFishVisuals() {
+    if (!threeState.enabled || !threeState.fishMeshes) return;
+    const { dummy, boidMesh, boidShadowMesh, predMesh, predShadowMesh } = threeState.fishMeshes;
+    const THREE = window.THREE;
+    const tempColor = new THREE.Color();
+    let boidIndex = 0;
+
+    for (const boid of allBoids) {
+        if (!boid.isAlive || boidIndex >= MAX_TOTAL_BOIDS) continue;
+        const p = toThreePos(boid.position);
+        const speedRatio = Math.min(1, boid.velocity.mag() / (boid.config.maxSpeed || 1));
+        const growth = boid.getGrowthScale ? boid.getGrowthScale() : 1;
+        const heading = Math.atan2(boid.velocity.y, boid.velocity.x);
+        const size = 0.62 * growth;
+
+        dummy.position.set(p.x, p.y, -8.9 + speedRatio * 0.35);
+        dummy.rotation.set(0, 0, heading);
+        dummy.scale.set(size, size, size * 0.88);
+        dummy.updateMatrix();
+        boidMesh.setMatrixAt(boidIndex, dummy.matrix);
+        tempColor.set(boid.config.color);
+        boidMesh.setColorAt(boidIndex, tempColor);
+
+        dummy.position.set(p.x + 0.08, p.y - 0.32, -11.6);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(size * 0.95, size * 0.58, 1);
+        dummy.updateMatrix();
+        boidShadowMesh.setMatrixAt(boidIndex, dummy.matrix);
+        boidIndex++;
+    }
+    boidMesh.count = boidIndex;
+    boidShadowMesh.count = boidIndex;
+    boidMesh.instanceMatrix.needsUpdate = true;
+    boidShadowMesh.instanceMatrix.needsUpdate = true;
+    if (boidMesh.instanceColor) boidMesh.instanceColor.needsUpdate = true;
+
+    let predIndex = 0;
+    for (const pred of predators) {
+        if (!pred.isAlive || predIndex >= 16) continue;
+        const p = toThreePos(pred.position);
+        const heading = Math.atan2(pred.velocity.y, pred.velocity.x);
+        const speedRatio = Math.min(1, pred.velocity.mag() / (pred.config.maxSpeed || 1));
+        const size = 0.9 + speedRatio * 0.25;
+
+        dummy.position.set(p.x, p.y, -8.45 + speedRatio * 0.35);
+        dummy.rotation.set(0, 0, heading);
+        dummy.scale.set(size, size, size * 0.9);
+        dummy.updateMatrix();
+        predMesh.setMatrixAt(predIndex, dummy.matrix);
+
+        dummy.position.set(p.x + 0.1, p.y - 0.38, -11.55);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(size * 1.05, size * 0.65, 1);
+        dummy.updateMatrix();
+        predShadowMesh.setMatrixAt(predIndex, dummy.matrix);
+        predIndex++;
+    }
+    predMesh.count = predIndex;
+    predShadowMesh.count = predIndex;
+    predMesh.instanceMatrix.needsUpdate = true;
+    predShadowMesh.instanceMatrix.needsUpdate = true;
+}
+
+function spawnVolcanoShockwave(vObj) {
+    if (!threeState.enabled || typeof window.THREE === 'undefined') return;
+    const THREE = window.THREE;
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.4, 0.54, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0xffa060,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        })
+    );
+    const p = toThreePos(vObj.position);
+    ring.position.set(p.x, p.y, -9.15);
+    ring.rotation.x = Math.PI * 0.06;
+    threeState.scene.add(ring);
+    threeState.shockwaves.push({
+        mesh: ring,
+        start: performance.now(),
+        duration: 1850,
+        maxScale: 5.5 + vObj.maxLethalRadius * 0.05
+    });
+}
+
+function updateVolcanoShockwaves() {
+    if (!threeState.enabled || threeState.shockwaves.length === 0) return;
+    const now = performance.now();
+    for (let i = threeState.shockwaves.length - 1; i >= 0; i--) {
+        const wave = threeState.shockwaves[i];
+        const t = (now - wave.start) / wave.duration;
+        if (t >= 1) {
+            threeState.scene.remove(wave.mesh);
+            if (wave.mesh.geometry) wave.mesh.geometry.dispose();
+            if (wave.mesh.material) wave.mesh.material.dispose();
+            threeState.shockwaves.splice(i, 1);
+            continue;
+        }
+        const eased = 1 - Math.pow(1 - t, 2);
+        const scale = 1 + eased * wave.maxScale;
+        wave.mesh.scale.set(scale, scale, 1);
+        wave.mesh.material.opacity = (1 - eased) * 0.55;
+    }
+}
+
 function syncThreeHazards(whirlpools, volcanoes) {
     if (!threeState.enabled) return;
     const now = Date.now() * 0.001;
@@ -908,6 +1114,7 @@ function syncThreeHazards(whirlpools, volcanoes) {
     }
 
     for (const vObj of volcanoes) {
+        if (vObj.justErupted) spawnVolcanoShockwave(vObj);
         if (!threeState.volcanoMeshes.has(vObj.effectId)) {
             const mesh = createVolcanoMesh();
             threeState.volcanoMeshes.set(vObj.effectId, mesh);
@@ -939,6 +1146,7 @@ function renderThreeBackground(time, target) {
     if (!threeState.enabled) return;
     threeState.particles.rotation.z = Math.sin(time * 0.18) * 0.28;
     threeState.particles.rotation.y = Math.cos(time * 0.13) * 0.16;
+    updateVolcanoShockwaves();
 
     if (target) {
         const p = toThreePos(target);
@@ -951,9 +1159,51 @@ function renderThreeBackground(time, target) {
         threeState.targetGlow.visible = false;
     }
 
-    threeState.camera.position.x = Math.sin(time * 0.11) * 0.6;
-    threeState.camera.position.y = Math.cos(time * 0.09) * 0.4;
-    threeState.camera.lookAt(0, 0, -8);
+    let targetCamX = 0;
+    let targetCamY = 0;
+    let targetCamZ = 26;
+    let lookX = 0;
+    let lookY = 0;
+    let lookZ = -8;
+
+    if (threeState.cameraMode === 'orbit') {
+        const orbitTarget = target ? toThreePos(target) : { x: 0, y: 0 };
+        const r = 3.8;
+        targetCamX = orbitTarget.x + Math.cos(time * 0.35) * r;
+        targetCamY = orbitTarget.y + Math.sin(time * 0.28) * (r * 0.6);
+        targetCamZ = 25.5;
+        lookX = orbitTarget.x;
+        lookY = orbitTarget.y;
+    } else if (threeState.cameraMode === 'fish') {
+        if (!threeState.fishFocus || !threeState.fishFocus.isAlive || Math.random() < 0.003) {
+            chooseFishFocus();
+        }
+        if (threeState.fishFocus) {
+            const focus = threeState.fishFocus;
+            const focusPos = toThreePos(focus.position);
+            const v = focus.velocity;
+            const mag = Math.max(0.001, Math.sqrt(v.x * v.x + v.y * v.y));
+            const dirX = v.x / mag;
+            const dirY = v.y / mag;
+            targetCamX = focusPos.x + dirX * 0.25;
+            targetCamY = focusPos.y + dirY * 0.2;
+            targetCamZ = -8.35 + Math.sin(time * 6.5) * 0.08;
+            lookX = focusPos.x + dirX * 2.4;
+            lookY = focusPos.y + dirY * 2.4;
+            lookZ = -8.15;
+        } else {
+            targetCamX = Math.sin(time * 0.11) * 0.6;
+            targetCamY = Math.cos(time * 0.09) * 0.4;
+        }
+    } else {
+        targetCamX = Math.sin(time * 0.11) * 0.6;
+        targetCamY = Math.cos(time * 0.09) * 0.4;
+    }
+
+    threeState.camera.position.x += (targetCamX - threeState.camera.position.x) * 0.12;
+    threeState.camera.position.y += (targetCamY - threeState.camera.position.y) * 0.12;
+    threeState.camera.position.z += (targetCamZ - threeState.camera.position.z) * 0.12;
+    threeState.camera.lookAt(lookX, lookY, lookZ);
     threeState.renderer.render(threeState.scene, threeState.camera);
 }
 
@@ -969,6 +1219,31 @@ function disposeThreeBackground() {
     if (!threeState.enabled) return;
     disposeHazardMeshes(threeState.whirlpoolMeshes);
     disposeHazardMeshes(threeState.volcanoMeshes);
+    for (const wave of threeState.shockwaves) {
+        threeState.scene.remove(wave.mesh);
+        if (wave.mesh.geometry) wave.mesh.geometry.dispose();
+        if (wave.mesh.material) wave.mesh.material.dispose();
+    }
+    threeState.shockwaves = [];
+    if (threeState.fishMeshes) {
+        const meshes = [
+            threeState.fishMeshes.boidMesh,
+            threeState.fishMeshes.boidShadowMesh,
+            threeState.fishMeshes.predMesh,
+            threeState.fishMeshes.predShadowMesh
+        ];
+        meshes.forEach(mesh => {
+            if (!mesh) return;
+            threeState.scene.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) {
+                if (Array.isArray(mesh.material)) mesh.material.forEach(m => m.dispose());
+                else mesh.material.dispose();
+            }
+        });
+    }
+    threeState.fishMeshes = null;
+    threeState.fishFocus = null;
     if (threeState.particles) {
         if (threeState.particles.geometry) threeState.particles.geometry.dispose();
         if (threeState.particles.material) threeState.particles.material.dispose();
@@ -1009,12 +1284,20 @@ function initialize() {
     flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = []; whirlpools = []; volcanoes = [];
     disposeHazardMeshes(threeState.whirlpoolMeshes);
     disposeHazardMeshes(threeState.volcanoMeshes);
+    for (const wave of threeState.shockwaves) {
+        threeState.scene?.remove(wave.mesh);
+        if (wave.mesh.geometry) wave.mesh.geometry.dispose();
+        if (wave.mesh.material) wave.mesh.material.dispose();
+    }
+    threeState.shockwaves = [];
+    threeState.fishFocus = null;
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
     for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
     for (let i = 0; i < NUM_BACKGROUND_FISH; i++) { const color = BACKGROUND_FISH_COLORS[Math.floor(Math.random() * BACKGROUND_FISH_COLORS.length)]; backgroundFish.push(new BackgroundFish(Math.random() * w(), Math.random() * h(), { ...backgroundFishConfig, color: color })); }
     initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
+    if (threeState.cameraMode === 'fish') chooseFishFocus();
     rebuildStaticBackground();
 }
 
@@ -1037,6 +1320,34 @@ function drawWaterOverlay(ctx, time) {
             const y = baseY + Math.sin(x * 0.014 + time * 1.2 + i) * 10;
             (x === 0) ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         }
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawWhirlpoolNormalDistortion(ctx, whirlpools, time) {
+    if (!whirlpools.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (const wObj of whirlpools) {
+        const r = wObj.baseRadius * wObj.lifeCycleProgress;
+        if (r < 12) continue;
+        const swirl = 0.25 + wObj.coreStrength * 0.75;
+        const localPulse = 0.5 + 0.5 * Math.sin(time * 4 + wObj.position.x * 0.01);
+        const gradient = ctx.createRadialGradient(
+            wObj.position.x, wObj.position.y, r * 0.12,
+            wObj.position.x, wObj.position.y, r
+        );
+        gradient.addColorStop(0, `rgba(168, 222, 255, ${0.12 * swirl})`);
+        gradient.addColorStop(0.6, `rgba(110, 188, 240, ${0.08 * swirl * localPulse})`);
+        gradient.addColorStop(1, 'rgba(90, 150, 200, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(wObj.position.x - r, wObj.position.y - r, r * 2, r * 2);
+
+        ctx.strokeStyle = `rgba(185, 228, 255, ${0.09 + wObj.coreStrength * 0.18})`;
+        ctx.lineWidth = 1.1 + wObj.coreStrength * 1.8;
+        ctx.beginPath();
+        ctx.arc(wObj.position.x, wObj.position.y, r * (0.22 + wObj.rippleStrength * 0.12), time * 2.8, time * 2.8 + Math.PI * 1.35);
         ctx.stroke();
     }
     ctx.restore();
@@ -1069,7 +1380,6 @@ function drawClickWaves(now) {
 // --- 动画循环 ---
 function animate() {
     animationTime += 0.02;
-    renderThreeBackground(animationTime, mouseTarget);
 
     ctx.clearRect(0, 0, w(), h());
     ctx.drawImage(staticBgCanvas, 0, 0, w(), h());
@@ -1082,6 +1392,7 @@ function animate() {
     if (Math.random() < VOLCANO_SPAWN_CHANCE && volcanoes.length < MAX_VOLCANOES) { volcanoes.push(new Volcano(Math.random() * w(), Math.random() * h())); }
     volcanoes.forEach(vObj => vObj.update());
     syncThreeHazards(whirlpools, volcanoes);
+    drawWhirlpoolNormalDistortion(ctx, whirlpools, animationTime);
 
     volcanoes.forEach(vObj => vObj.draw(ctx));
     volcanoes = volcanoes.filter(vObj => vObj.isAlive);
@@ -1170,6 +1481,8 @@ function animate() {
     if (initialCountB > 0) percentBEl.innerText = `${Math.round((flockB.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
     if (initialCountC > 0) percentCEl.innerText = `${Math.round((flockC.length / NUM_BOIDS_PER_FLOCK) * 100)}%`;
 
+    syncThreeFishVisuals();
+    renderThreeBackground(animationTime, mouseTarget);
     requestAnimationFrame(animate);
 }
 
@@ -1191,6 +1504,14 @@ canvas.addEventListener('mousedown', e => {
         playSound(soundC, masterVolume * (awareCounts.c / totalAware));
     }
 });
+window.addEventListener('keydown', e => {
+    const key = e.key.toLowerCase();
+    if (key === 'c') {
+        cycleCameraMode();
+    } else if (key === 'x') {
+        chooseFishFocus();
+    }
+});
 window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -1201,6 +1522,7 @@ window.addEventListener('beforeunload', disposeThreeBackground);
 
 // 启动
 initThreeBackground();
+updateCameraModeLabel();
 initialize();
 animate();
 </script>
