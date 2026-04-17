@@ -224,7 +224,13 @@ class Agent {
 
 // --- Boid 类 ---
 class Boid extends Agent {
-    constructor(x, y, config) { super(x, y, config); this.birthingUrge = 0; this.awarenessEndTime = 0; }
+    constructor(x, y, config) {
+        super(x, y, config);
+        this.birthingUrge = 0;
+        this.awarenessEndTime = 0;
+        this.birthTime = Date.now();
+        this.growthDuration = 7000 + Math.random() * 5000;
+    }
     showAwarenessIndicator(duration = 1500) { this.awarenessEndTime = Date.now() + duration; }
     applyBehaviors(allBoids, ownFlock, predators, obstacles, target, whirlpools, volcanoes) {
         if (!this.isAlive) return;
@@ -242,12 +248,24 @@ class Boid extends Agent {
         if (target && Vector.dist(this.position, target) < MOUSE_INFLUENCE_RADIUS) { this.acceleration.add(this.seek(target).mult(this.config.seekWeight)); }
         this.applyWhirlpoolForce(whirlpools);
     }
+    getGrowthProgress() {
+        const t = Math.min(1, (Date.now() - this.birthTime) / this.growthDuration);
+        return t * t * (3 - 2 * t);
+    }
     handleReproduction(ownFlock) {
         if (!this.config.canReproduce) return null;
         let closeMates = 0;
         for (let other of ownFlock) { if (other !== this && Vector.dist(this.position, other.position) < this.config.reproductionRadius) { closeMates++; } }
         if (closeMates >= this.config.reproductionThreshold) { this.birthingUrge += 0.5; } else { this.birthingUrge = Math.max(0, this.birthingUrge - 1); }
-        if (this.birthingUrge >= this.config.reproductionUrgeMax) { this.birthingUrge = 0; if (Math.random() < this.config.reproductionChance) { return new Boid(this.position.x, this.position.y, this.config); } }
+        if (this.birthingUrge >= this.config.reproductionUrgeMax) {
+            this.birthingUrge = 0;
+            if (Math.random() < this.config.reproductionChance) {
+                const baby = new Boid(this.position.x, this.position.y, this.config);
+                baby.birthTime = Date.now();
+                baby.growthDuration = 9000 + Math.random() * 7000;
+                return baby;
+            }
+        }
         return null;
     }
     mob(predators) { let s = new Vector(); let t=0; for (let p of predators) { let d=Vector.dist(this.position,p.position); if (d < this.config.fleeRadius) { s.add(Vector.sub(p.position,this.position)); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce*1.5); } return s; }
@@ -282,6 +300,11 @@ class Boid extends Agent {
     separation(allBoids) { let s = new Vector(); let t=0; for (let o of allBoids) { let d=Vector.dist(this.position,o.position); if (o!==this && d < this.config.separationRadius) { let diff=Vector.sub(this.position,o.position); diff.div(d*d); s.add(diff); t++;}} if(t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
     alignment(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.velocity); t++; }} if (t>0) { s.div(t); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
     cohesion(ownFlock) { let s = new Vector(); let t=0; for (let o of ownFlock) { if(o!==this) { s.add(o.position); t++; }} if (t>0) { s.div(t); s.sub(this.position); s.normalize().mult(this.config.maxSpeed); s.sub(this.velocity).limit(this.config.maxForce); } return s; }
+    getGrowthScale() {
+        const age = Date.now() - this.birthTime;
+        const t = Math.min(1, age / this.growthDuration);
+        return 0.35 + t * 0.65;
+    }
     draw(ctx) {
         if (this.isAlive && this.awarenessEndTime > Date.now()) { const timeLeft = this.awarenessEndTime - Date.now(), fadeDuration = 500; let opacity = (timeLeft < fadeDuration) ? (timeLeft / fadeDuration) : 1; ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = `rgba(255, 255, 100, ${opacity})`; ctx.textAlign = 'center'; ctx.fillText('!', 0, -12); ctx.restore(); }
         if (!this.isAlive) { this.drawTombstone(ctx); return; }
@@ -291,6 +314,12 @@ class Boid extends Agent {
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
         const speedRatio = Math.min(1, this.velocity.mag() / (this.config.maxSpeed || 1));
         ctx.globalAlpha = 0.9 + speedRatio * 0.1;
+        const growthScale = this.getGrowthScale();
+        ctx.scale(growthScale, growthScale);
+
+        const isFlockA = this.config.color === flockA_Config.color;
+        const isFlockB = this.config.color === flockB_Config.color;
+        const isFlockC = this.config.color === flockC_Config.color;
 
         if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
             const imgWidth = 22;
@@ -304,18 +333,60 @@ class Boid extends Agent {
             ctx.ellipse(-2, -2, imgWidth * 0.32, imgHeight * 0.2, -0.25, 0, Math.PI * 2);
             ctx.fill();
         } else {
-            const bodyGradient = ctx.createLinearGradient(9, -3, -8, 4);
-            bodyGradient.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
-            bodyGradient.addColorStop(0.45, this.config.color);
-            bodyGradient.addColorStop(1, 'rgba(8, 16, 30, 0.8)');
-            ctx.fillStyle = bodyGradient;
-            ctx.beginPath();
-            ctx.moveTo(10, 0);
-            ctx.quadraticCurveTo(1, -6, -6, -4);
-            ctx.lineTo(-8, 0);
-            ctx.lineTo(-6, 4);
-            ctx.quadraticCurveTo(1, 6, 10, 0);
-            ctx.fill();
+            if (isFlockA) {
+                const bodyGradient = ctx.createLinearGradient(9, -3, -8, 4);
+                bodyGradient.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+                bodyGradient.addColorStop(0.45, this.config.color);
+                bodyGradient.addColorStop(1, 'rgba(8, 16, 30, 0.8)');
+                ctx.fillStyle = bodyGradient;
+                ctx.beginPath();
+                ctx.moveTo(10, 0);
+                ctx.quadraticCurveTo(1, -6, -6, -4);
+                ctx.lineTo(-8, 0);
+                ctx.lineTo(-6, 4);
+                ctx.quadraticCurveTo(1, 6, 10, 0);
+                ctx.fill();
+            } else if (isFlockB) {
+                const bodyGradient = ctx.createLinearGradient(10, -2, -9, 3);
+                bodyGradient.addColorStop(0, 'rgba(255, 248, 210, 0.92)');
+                bodyGradient.addColorStop(0.42, this.config.color);
+                bodyGradient.addColorStop(1, 'rgba(58, 39, 16, 0.86)');
+                ctx.fillStyle = bodyGradient;
+                ctx.beginPath();
+                ctx.moveTo(12, 0);
+                ctx.quadraticCurveTo(5, -4, -4, -2.8);
+                ctx.lineTo(-10, -5);
+                ctx.lineTo(-7.5, 0);
+                ctx.lineTo(-10, 5);
+                ctx.lineTo(-4, 2.8);
+                ctx.quadraticCurveTo(5, 4, 12, 0);
+                ctx.fill();
+            } else if (isFlockC) {
+                const bodyGradient = ctx.createLinearGradient(8, -5, -9, 5);
+                bodyGradient.addColorStop(0, 'rgba(244, 230, 255, 0.88)');
+                bodyGradient.addColorStop(0.45, this.config.color);
+                bodyGradient.addColorStop(1, 'rgba(34, 18, 58, 0.88)');
+                ctx.fillStyle = bodyGradient;
+                ctx.beginPath();
+                ctx.moveTo(9, 0);
+                ctx.lineTo(3, -4);
+                ctx.lineTo(-2, -6);
+                ctx.lineTo(-7, -3.2);
+                ctx.lineTo(-8.6, 0);
+                ctx.lineTo(-7, 3.2);
+                ctx.lineTo(-2, 6);
+                ctx.lineTo(3, 4);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = 'rgba(205, 178, 255, 0.55)';
+                ctx.beginPath();
+                ctx.moveTo(-2, 0);
+                ctx.lineTo(-7.5, -2.8);
+                ctx.lineTo(-7.5, 2.8);
+                ctx.closePath();
+                ctx.fill();
+            }
 
             ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
             ctx.beginPath();
@@ -443,10 +514,15 @@ class Whirlpool {
         this.growDuration = totalLife * 0.25;
         this.shrinkDuration = totalLife * 0.35;
         this.endTime = this.creationTime + totalLife;
+        this.rippleDuration = totalLife * 0.35;
+        this.coreDuration = totalLife * 0.4;
 
         this.baseRadius = 250 + Math.random() * 100;
         this.baseStrength = 0.4 + Math.random() * 0.2;
         this.lifeCycleProgress = 0;
+        this.phase = 'ripple';
+        this.rippleStrength = 0;
+        this.coreStrength = 0;
     }
     update() {
         const now = Date.now();
@@ -454,6 +530,7 @@ class Whirlpool {
 
         const age = now - this.creationTime;
         const timeUntilEnd = this.endTime - now;
+        const activeAge = age - this.rippleDuration;
 
         if (age < this.growDuration) {
             this.lifeCycleProgress = age / this.growDuration;
@@ -461,6 +538,20 @@ class Whirlpool {
             this.lifeCycleProgress = timeUntilEnd / this.shrinkDuration;
         } else {
             this.lifeCycleProgress = 1.0;
+        }
+
+        if (age < this.rippleDuration) {
+            this.phase = 'ripple';
+            this.rippleStrength = age / this.rippleDuration;
+            this.coreStrength = 0;
+        } else if (activeAge < this.coreDuration) {
+            this.phase = 'core';
+            this.rippleStrength = 1;
+            this.coreStrength = Math.min(1, activeAge / this.coreDuration);
+        } else {
+            this.phase = 'fade';
+            this.rippleStrength = Math.max(0, timeUntilEnd / this.shrinkDuration);
+            this.coreStrength = this.rippleStrength;
         }
         
         this.position.add(this.velocity);
@@ -496,16 +587,20 @@ class Volcano {
         this.influenceRadius = 150;
         this.displacementStrength = 0;
         this.heatStrength = 0;
+        this.smokeStrength = 0;
+        this.eruptionStrength = 0;
+        this.phase = 'smoke';
 
         this.angle = (Math.random() - 0.5) * Math.PI * 0.8;
         
         this.particles = [];
-         for(let i=0; i<50; i++) {
+         for(let i=0; i<65; i++) {
             this.particles.push({
                 pos: this.position.clone(),
                 vel: new Vector(Math.random() * 2 - 1, -Math.random() * 3),
                 life: Math.random(),
-                size: Math.random() * 2.5 + 1
+                size: Math.random() * 2.5 + 1,
+                kind: Math.random() < 0.62 ? 'smoke' : 'lava'
             });
         }
     }
@@ -524,23 +619,38 @@ class Volcano {
             this.lethalRadius = 0;
             this.displacementStrength = 25 * progress;
             this.heatStrength = progress;
+            this.smokeStrength = progress;
+            this.eruptionStrength = 0;
+            this.phase = 'smoke';
         } else if (age < this.fissureDuration + this.lavaDuration) {
             progress = (age - this.fissureDuration) / this.lavaDuration;
             const pulse = progress < 0.8 ? (progress / 0.8) : 1;
             this.lethalRadius = this.maxLethalRadius * pulse;
             this.displacementStrength = 25 + 35 * pulse;
             this.heatStrength = 1.0;
+            this.smokeStrength = Math.max(0.35, 1 - progress * 0.65);
+            this.eruptionStrength = pulse;
+            this.phase = 'erupt';
         } else {
             progress = (age - this.fissureDuration - this.lavaDuration) / this.coolDuration;
             this.lethalRadius = this.maxLethalRadius * (1 - progress);
             this.displacementStrength = 60 * (1 - progress);
             this.heatStrength = 1 - progress;
+            this.smokeStrength = Math.max(0, 0.75 * (1 - progress));
+            this.eruptionStrength = Math.max(0, 1 - progress);
+            this.phase = 'cool';
         }
 
         this.particles.forEach(p => {
             p.pos.add(p.vel);
-            p.vel.y += 0.03;
-            p.life -= 0.015;
+            if (p.kind === 'smoke') {
+                p.vel.y -= 0.01;
+                p.vel.x *= 0.995;
+                p.life -= 0.008;
+            } else {
+                p.vel.y += 0.03;
+                p.life -= 0.015;
+            }
             if(p.life <= 0) {
                 const randomPosOnFissure = new Vector( (Math.random() - 0.5) * this.fissureLength, 0);
                 const rotatedPos = new Vector(
@@ -548,8 +658,14 @@ class Volcano {
                     randomPosOnFissure.x * Math.sin(this.angle) + randomPosOnFissure.y * Math.cos(this.angle)
                 );
                 p.pos = this.position.clone().add(rotatedPos);
-                p.vel = new Vector(Math.random() * 1 - 0.5, -Math.random() * 2.5 * this.heatStrength);
+                p.kind = (this.phase === 'smoke' || Math.random() < this.smokeStrength) ? 'smoke' : 'lava';
+                if (p.kind === 'smoke') {
+                    p.vel = new Vector(Math.random() * 0.8 - 0.4, -(0.6 + Math.random() * 1.6));
+                } else {
+                    p.vel = new Vector(Math.random() * 1.2 - 0.6, -Math.random() * 2.8 * Math.max(0.3, this.eruptionStrength));
+                }
                 p.life = Math.random() * 0.5 + 0.5;
+                p.size = p.kind === 'smoke' ? (2.3 + Math.random() * 3.2) : (1 + Math.random() * 2.2);
             }
         });
     }
@@ -557,12 +673,17 @@ class Volcano {
     draw(ctx) {
         if (!this.isAlive) return;
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalCompositeOperation = 'source-over';
         this.particles.forEach(p => {
             if (p.life > 0) {
-                 const heat = this.heatStrength;
-                 const alpha = p.life * 0.6 * heat;
-                 ctx.fillStyle = `rgba(255, ${150 * heat}, 0, ${alpha})`;
+                 if (p.kind === 'smoke') {
+                    const alpha = p.life * 0.34 * this.smokeStrength;
+                    ctx.fillStyle = `rgba(96, 102, 112, ${alpha})`;
+                 } else {
+                    const heat = this.heatStrength;
+                    const alpha = p.life * 0.65 * this.eruptionStrength;
+                    ctx.fillStyle = `rgba(255, ${120 + 120 * heat}, ${25 + 20 * heat}, ${alpha})`;
+                 }
                  ctx.beginPath();
                  ctx.arc(p.pos.x, p.pos.y, p.size, 0, Math.PI * 2);
                  ctx.fill();
@@ -714,15 +835,19 @@ function initThreeBackground() {
 function createWhirlpoolMesh() {
     const THREE = window.THREE;
     const group = new THREE.Group();
+    const mist = new THREE.Mesh(
+        new THREE.TorusGeometry(1.28, 0.24, 10, 52),
+        new THREE.MeshBasicMaterial({ color: 0xd7eeff, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
+    );
     const ring = new THREE.Mesh(
         new THREE.TorusGeometry(1, 0.14, 10, 44),
         new THREE.MeshBasicMaterial({ color: 0x7dcfff, transparent: true, opacity: 0.65, wireframe: true })
     );
     const core = new THREE.Mesh(
-        new THREE.RingGeometry(0.2, 0.95, 32),
+        new THREE.RingGeometry(0.2, 0.72, 32),
         new THREE.MeshBasicMaterial({ color: 0xbce8ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
     );
-    group.add(ring, core);
+    group.add(mist, ring, core);
     return group;
 }
 
@@ -738,9 +863,14 @@ function createVolcanoMesh() {
         new THREE.SphereGeometry(0.36, 16, 16),
         new THREE.MeshBasicMaterial({ color: 0xff7d32, transparent: true, opacity: 0.45 })
     );
+    const smoke = new THREE.Mesh(
+        new THREE.SphereGeometry(0.72, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x7b828c, transparent: true, opacity: 0.35 })
+    );
     plume.position.y = 0.75;
-    group.add(cone, plume);
-    return { group, plume };
+    smoke.position.y = 1.0;
+    group.add(cone, plume, smoke);
+    return { group, plume, smoke };
 }
 
 function syncThreeHazards(whirlpools, volcanoes) {
@@ -758,9 +888,16 @@ function syncThreeHazards(whirlpools, volcanoes) {
         const s = 0.008 + wObj.baseRadius * wObj.lifeCycleProgress * 0.002;
         mesh.position.set(p.x, p.y, -8.5);
         mesh.scale.set(s, s, s * 0.7);
-        mesh.rotation.z += 0.018 + wObj.baseStrength * 0.02;
+        mesh.rotation.z += 0.008 + wObj.coreStrength * 0.045;
         mesh.rotation.x = Math.sin(now + p.x * 0.2) * 0.25;
-        mesh.children.forEach(c => { if (c.material) c.material.opacity = 0.15 + wObj.lifeCycleProgress * 0.55; });
+        const mist = mesh.children[0];
+        const ring = mesh.children[1];
+        const core = mesh.children[2];
+        if (mist?.material) mist.material.opacity = 0.16 + wObj.rippleStrength * 0.34;
+        if (mist) mist.scale.setScalar(1 + wObj.rippleStrength * 0.32);
+        if (ring?.material) ring.material.opacity = 0.1 + wObj.coreStrength * 0.62;
+        if (core?.material) core.material.opacity = 0.06 + wObj.coreStrength * 0.78;
+        if (core) core.rotation.z -= 0.03 + wObj.coreStrength * 0.05;
     }
     for (const [id, mesh] of threeState.whirlpoolMeshes.entries()) {
         if (!whirlpools.some(wObj => wObj.effectId === id)) {
@@ -782,8 +919,12 @@ function syncThreeHazards(whirlpools, volcanoes) {
         mesh.group.position.set(p.x, p.y, -9.3);
         mesh.group.rotation.z = -vObj.angle;
         mesh.group.scale.set(s, s * 0.9, s);
-        mesh.plume.scale.setScalar(0.8 + vObj.heatStrength * 1.9);
-        mesh.plume.material.opacity = 0.18 + vObj.heatStrength * 0.55;
+        mesh.plume.scale.setScalar(0.4 + vObj.eruptionStrength * 2.1);
+        mesh.plume.material.opacity = 0.06 + vObj.eruptionStrength * 0.7;
+        mesh.plume.material.color.set(vObj.phase === 'smoke' ? 0xffab63 : 0xff6f2a);
+        mesh.smoke.scale.setScalar(0.8 + vObj.smokeStrength * 2.8);
+        mesh.smoke.material.opacity = 0.08 + vObj.smokeStrength * 0.45;
+        mesh.smoke.position.y = 0.7 + vObj.smokeStrength * 0.9;
     }
     for (const [id, mesh] of threeState.volcanoMeshes.entries()) {
         if (!volcanoes.some(vObj => vObj.effectId === id)) {
@@ -966,9 +1107,9 @@ function animate() {
     predators.forEach(predator => { predator.applyBehaviors(allBoids, predators, whirlpools, volcanoes); predator.update(); predator.edges(); predator.draw(ctx); for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } } });
 
     for (const vObj of volcanoes) {
-        if (vObj.heatStrength > 0.5) {
+        if (vObj.phase === 'erupt' || vObj.phase === 'cool') {
             for (const p of vObj.particles) {
-                if (p.life <= 0) continue;
+                if (p.life <= 0 || p.kind !== 'lava') continue;
                 for (let i = allBoids.length - 1; i >= 0; i--) {
                     const boid = allBoids[i];
                     if (boid.isAlive && Vector.dist(boid.position, p.pos) < p.size + 8) {
