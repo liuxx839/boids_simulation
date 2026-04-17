@@ -63,6 +63,21 @@
             filter: saturate(1.1) contrast(1.05);
         }
 
+        #threeBg {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            overflow: hidden;
+            background: radial-gradient(circle at 50% 45%, rgba(20, 40, 70, 0.65), rgba(3, 6, 12, 0.95));
+        }
+
+        #threeBg canvas {
+            width: 100%;
+            height: 100%;
+            filter: none;
+        }
+
         .atmosphere-layer {
             position: fixed;
             inset: 0;
@@ -137,6 +152,7 @@
     </style>
 </head>
 <body>
+    <div id="threeBg"></div>
     <div class="atmosphere-layer"></div>
     <div class="info">
         <div class="info-title">Deep Ocean Ecosystem</div>
@@ -151,6 +167,7 @@
     </div>
     <canvas id="boidsCanvas"></canvas>
 
+<script src="https://unpkg.com/three@0.163.0/build/three.min.js"></script>
 <script>
 // --- 图像加载 ---
 const imageA = new Image(); imageA.src = 'image/a.png';
@@ -274,20 +291,35 @@ class Boid extends Agent {
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
         const speedRatio = Math.min(1, this.velocity.mag() / (this.config.maxSpeed || 1));
         ctx.globalAlpha = 0.9 + speedRatio * 0.1;
-        ctx.shadowColor = this.config.color;
-        ctx.shadowBlur = 8 + speedRatio * 7;
 
         if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
             const imgWidth = 22;
             const imgHeight = 22;
             ctx.drawImage(this.config.image, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+            const sheen = ctx.createLinearGradient(-imgWidth * 0.3, -imgHeight * 0.4, imgWidth * 0.35, imgHeight * 0.15);
+            sheen.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+            sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = sheen;
+            ctx.beginPath();
+            ctx.ellipse(-2, -2, imgWidth * 0.32, imgHeight * 0.2, -0.25, 0, Math.PI * 2);
+            ctx.fill();
         } else {
+            const bodyGradient = ctx.createLinearGradient(9, -3, -8, 4);
+            bodyGradient.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+            bodyGradient.addColorStop(0.45, this.config.color);
+            bodyGradient.addColorStop(1, 'rgba(8, 16, 30, 0.8)');
+            ctx.fillStyle = bodyGradient;
             ctx.beginPath();
             ctx.moveTo(10, 0);
-            ctx.lineTo(-5, -5);
-            ctx.lineTo(-5, 5);
-            ctx.closePath();
-            ctx.fillStyle = this.config.color;
+            ctx.quadraticCurveTo(1, -6, -6, -4);
+            ctx.lineTo(-8, 0);
+            ctx.lineTo(-6, 4);
+            ctx.quadraticCurveTo(1, 6, 10, 0);
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+            ctx.beginPath();
+            ctx.ellipse(1.2, -1.2, 2.8, 1.2, -0.1, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -318,20 +350,26 @@ class Predator extends Agent {
         ctx.translate(this.position.x, this.position.y);
         ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
         const speedRatio = Math.min(1, this.velocity.mag() / (this.config.maxSpeed || 1));
-        ctx.shadowColor = 'rgba(255, 110, 110, 0.75)';
-        ctx.shadowBlur = 10 + speedRatio * 8;
 
         if (this.config.image && this.config.image.complete && this.config.image.naturalWidth !== 0) {
             const imgWidth = 35;
             const imgHeight = 35;
             ctx.drawImage(this.config.image, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+            ctx.fillStyle = `rgba(255, 205, 185, ${0.14 + speedRatio * 0.12})`;
+            ctx.beginPath();
+            ctx.ellipse(-2, -3, 8, 4.5, -0.25, 0, Math.PI * 2);
+            ctx.fill();
         } else {
             ctx.beginPath();
             ctx.moveTo(15, 0);
             ctx.lineTo(-7, -7);
             ctx.lineTo(-7, 7);
             ctx.closePath();
-            ctx.fillStyle = this.config.color;
+            const predatorGradient = ctx.createLinearGradient(13, -4, -8, 6);
+            predatorGradient.addColorStop(0, '#ffd6d0');
+            predatorGradient.addColorStop(0.35, this.config.color);
+            predatorGradient.addColorStop(1, '#421d1d');
+            ctx.fillStyle = predatorGradient;
             ctx.fill();
         }
 
@@ -365,13 +403,38 @@ class BackgroundFish extends Agent {
         this.applyWhirlpoolForce(whirlpools);
         super.update();
     }
-    draw(ctx) { ctx.save(); ctx.translate(this.position.x, this.position.y); ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x)); ctx.beginPath(); ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2); ctx.fillStyle = this.config.color; ctx.shadowColor = 'rgba(170, 210, 255, 0.35)'; ctx.shadowBlur = 4; ctx.fill(); ctx.restore(); }
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+        const fishGradient = ctx.createLinearGradient(3.5, -1.4, -3.5, 1.8);
+        fishGradient.addColorStop(0, 'rgba(225, 243, 255, 0.72)');
+        fishGradient.addColorStop(0.45, this.config.color);
+        fishGradient.addColorStop(1, 'rgba(8, 16, 26, 0.65)');
+        ctx.fillStyle = fishGradient;
+
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 4.5, 2.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-4.5, 0);
+        ctx.lineTo(-7.2, -1.5);
+        ctx.lineTo(-7.2, 1.5);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(170, 200, 220, 0.7)';
+        ctx.fill();
+
+        ctx.restore();
+    }
 }
 
 // --- 水龙卷类 ---
 class Whirlpool {
     constructor(x, y) {
         this.position = new Vector(x, y);
+        this.effectId = `w-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         this.velocity = new Vector(Math.random() - 0.5, Math.random() - 0.5).mult(2.2); 
         this.creationTime = Date.now();
         this.isAlive = true;
@@ -416,6 +479,7 @@ class Whirlpool {
 class Volcano {
     constructor(x, y) {
         this.position = new Vector(x, y);
+        this.effectId = `v-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         this.creationTime = Date.now();
         this.isAlive = true;
 
@@ -515,9 +579,8 @@ canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 let mouseTarget = null, targetTimeout = null;
 const MOUSE_INFLUENCE_RADIUS = 250;
 let clickWaves = [], animationTime = 0, audioInitialized = false;
-const grainCanvas = document.createElement('canvas');
-const grainCtx = grainCanvas.getContext('2d');
-let grainFrameCounter = 0;
+const staticBgCanvas = document.createElement('canvas');
+const staticBgCtx = staticBgCanvas.getContext('2d');
 
 let whirlpools = [];
 const MAX_WHIRLPOOLS = 1;
@@ -526,6 +589,18 @@ const WHIRLPOOL_SPAWN_CHANCE = 0.002;
 let volcanoes = [];
 const MAX_VOLCANOES = 1;
 const VOLCANO_SPAWN_CHANCE = 0.0015;
+
+const threeContainer = document.getElementById('threeBg');
+const threeState = {
+    enabled: false,
+    scene: null,
+    camera: null,
+    renderer: null,
+    particles: null,
+    targetGlow: null,
+    whirlpoolMeshes: new Map(),
+    volcanoMeshes: new Map()
+};
 
 // --- 音频对象 ---
 const soundA = new Audio('sound/a.mp3'), soundB = new Audio('sound/b.mp3'), soundC = new Audio('sound/c.mp3');
@@ -549,227 +624,284 @@ const predatorConfig = { image: imagePredator, color: '#f07167', maxSpeed: 4.5, 
 const NUM_BACKGROUND_FISH = 25, BACKGROUND_FISH_COLORS = ['#3a506b', '#5c6e81', '#1c2541', '#0b132b'], backgroundFishConfig = { maxSpeed: 1, maxForce: 0.03 };
 
 // --- 初始化 ---
-const NUM_BOIDS_PER_FLOCK = 70;
+const NUM_BOIDS_PER_FLOCK = 60;
+const MAX_TOTAL_BOIDS = 360;
 let flockA = [], flockB = [], flockC = [], allBoids = [], predators = [], tombstones = [], backgroundFish = [];
 let initialCountA = 0, initialCountB = 0, initialCountC = 0;
 const w = () => canvas.width, h = () => canvas.height;
 const percentAEl = document.getElementById('percentA'), percentBEl = document.getElementById('percentB'), percentCEl = document.getElementById('percentC');
 
-function resizeGrainCanvas() {
-    grainCanvas.width = Math.max(1, Math.floor(w() / 2));
-    grainCanvas.height = Math.max(1, Math.floor(h() / 2));
-    regenerateGrain();
+function toThreePos(pos) {
+    return {
+        x: (pos.x / w() - 0.5) * 34,
+        y: (0.5 - pos.y / h()) * 19
+    };
 }
 
-function regenerateGrain() {
-    const imageData = grainCtx.createImageData(grainCanvas.width, grainCanvas.height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-        const shade = 175 + Math.random() * 80;
-        data[i] = shade;
-        data[i + 1] = shade;
-        data[i + 2] = shade;
-        data[i + 3] = Math.random() * 28;
-    }
-    grainCtx.putImageData(imageData, 0, 0);
+function disposeHazardMeshes(map) {
+    map.forEach(entry => {
+        const root = entry.group || entry;
+        if (threeState.scene) threeState.scene.remove(root);
+        root.traverse?.(obj => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+                if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+                else obj.material.dispose();
+            }
+        });
+    });
+    map.clear();
 }
+
+function initThreeBackground() {
+    if (typeof window.THREE === 'undefined' || !threeContainer) return;
+    const THREE = window.THREE;
+
+    threeState.scene = new THREE.Scene();
+    threeState.scene.fog = new THREE.FogExp2(0x051123, 0.06);
+
+    threeState.camera = new THREE.PerspectiveCamera(45, w() / h(), 0.1, 200);
+    threeState.camera.position.set(0, 0, 26);
+
+    const ambient = new THREE.AmbientLight(0x6fa9d8, 0.72);
+    const key = new THREE.DirectionalLight(0x88c8ff, 0.7);
+    key.position.set(-10, 6, 12);
+    const warm = new THREE.DirectionalLight(0xff8844, 0.35);
+    warm.position.set(8, -6, 6);
+    threeState.scene.add(ambient, key, warm);
+
+    const particleCount = 520;
+    const positions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount; i++) {
+        const idx = i * 3;
+        positions[idx] = (Math.random() - 0.5) * 46;
+        positions[idx + 1] = (Math.random() - 0.5) * 26;
+        positions[idx + 2] = -6 - Math.random() * 35;
+    }
+    const particlesGeometry = new THREE.BufferGeometry();
+    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const particlesMaterial = new THREE.PointsMaterial({
+        color: 0x9ed8ff,
+        size: 0.12,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false
+    });
+    threeState.particles = new THREE.Points(particlesGeometry, particlesMaterial);
+    threeState.scene.add(threeState.particles);
+
+    const targetMaterial = new THREE.MeshBasicMaterial({
+        color: 0x9ee5ff,
+        transparent: true,
+        opacity: 0.24,
+        depthWrite: false
+    });
+    threeState.targetGlow = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), targetMaterial);
+    threeState.targetGlow.visible = false;
+    threeState.scene.add(threeState.targetGlow);
+
+    threeState.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: 'high-performance' });
+    threeState.renderer.setPixelRatio(Math.min(1.2, window.devicePixelRatio || 1));
+    threeState.renderer.setSize(w(), h(), false);
+    threeState.renderer.domElement.style.width = '100%';
+    threeState.renderer.domElement.style.height = '100%';
+    threeState.renderer.domElement.style.display = 'block';
+    threeContainer.innerHTML = '';
+    threeContainer.appendChild(threeState.renderer.domElement);
+    threeState.enabled = true;
+}
+
+function createWhirlpoolMesh() {
+    const THREE = window.THREE;
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1, 0.14, 10, 44),
+        new THREE.MeshBasicMaterial({ color: 0x7dcfff, transparent: true, opacity: 0.65, wireframe: true })
+    );
+    const core = new THREE.Mesh(
+        new THREE.RingGeometry(0.2, 0.95, 32),
+        new THREE.MeshBasicMaterial({ color: 0xbce8ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
+    );
+    group.add(ring, core);
+    return group;
+}
+
+function createVolcanoMesh() {
+    const THREE = window.THREE;
+    const group = new THREE.Group();
+    const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(0.58, 1.4, 16),
+        new THREE.MeshStandardMaterial({ color: 0x4d2b23, roughness: 0.76, metalness: 0.08 })
+    );
+    cone.rotation.x = Math.PI;
+    const plume = new THREE.Mesh(
+        new THREE.SphereGeometry(0.36, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xff7d32, transparent: true, opacity: 0.45 })
+    );
+    plume.position.y = 0.75;
+    group.add(cone, plume);
+    return { group, plume };
+}
+
+function syncThreeHazards(whirlpools, volcanoes) {
+    if (!threeState.enabled) return;
+    const now = Date.now() * 0.001;
+
+    for (const wObj of whirlpools) {
+        if (!threeState.whirlpoolMeshes.has(wObj.effectId)) {
+            const mesh = createWhirlpoolMesh();
+            threeState.whirlpoolMeshes.set(wObj.effectId, mesh);
+            threeState.scene.add(mesh);
+        }
+        const mesh = threeState.whirlpoolMeshes.get(wObj.effectId);
+        const p = toThreePos(wObj.position);
+        const s = 0.008 + wObj.baseRadius * wObj.lifeCycleProgress * 0.002;
+        mesh.position.set(p.x, p.y, -8.5);
+        mesh.scale.set(s, s, s * 0.7);
+        mesh.rotation.z += 0.018 + wObj.baseStrength * 0.02;
+        mesh.rotation.x = Math.sin(now + p.x * 0.2) * 0.25;
+        mesh.children.forEach(c => { if (c.material) c.material.opacity = 0.15 + wObj.lifeCycleProgress * 0.55; });
+    }
+    for (const [id, mesh] of threeState.whirlpoolMeshes.entries()) {
+        if (!whirlpools.some(wObj => wObj.effectId === id)) {
+            threeState.scene.remove(mesh);
+            mesh.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); if (obj.material) obj.material.dispose(); });
+            threeState.whirlpoolMeshes.delete(id);
+        }
+    }
+
+    for (const vObj of volcanoes) {
+        if (!threeState.volcanoMeshes.has(vObj.effectId)) {
+            const mesh = createVolcanoMesh();
+            threeState.volcanoMeshes.set(vObj.effectId, mesh);
+            threeState.scene.add(mesh.group);
+        }
+        const mesh = threeState.volcanoMeshes.get(vObj.effectId);
+        const p = toThreePos(vObj.position);
+        const s = 0.7 + vObj.lethalRadius * 0.02;
+        mesh.group.position.set(p.x, p.y, -9.3);
+        mesh.group.rotation.z = -vObj.angle;
+        mesh.group.scale.set(s, s * 0.9, s);
+        mesh.plume.scale.setScalar(0.8 + vObj.heatStrength * 1.9);
+        mesh.plume.material.opacity = 0.18 + vObj.heatStrength * 0.55;
+    }
+    for (const [id, mesh] of threeState.volcanoMeshes.entries()) {
+        if (!volcanoes.some(vObj => vObj.effectId === id)) {
+            threeState.scene.remove(mesh.group);
+            mesh.group.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); if (obj.material) obj.material.dispose(); });
+            threeState.volcanoMeshes.delete(id);
+        }
+    }
+}
+
+function renderThreeBackground(time, target) {
+    if (!threeState.enabled) return;
+    threeState.particles.rotation.z = Math.sin(time * 0.18) * 0.28;
+    threeState.particles.rotation.y = Math.cos(time * 0.13) * 0.16;
+
+    if (target) {
+        const p = toThreePos(target);
+        threeState.targetGlow.visible = true;
+        threeState.targetGlow.position.set(p.x, p.y, -7.6);
+        const pulse = 1 + 0.4 * Math.sin(time * 6);
+        threeState.targetGlow.scale.setScalar(pulse);
+        threeState.targetGlow.material.opacity = 0.2 + 0.12 * Math.sin(time * 4);
+    } else {
+        threeState.targetGlow.visible = false;
+    }
+
+    threeState.camera.position.x = Math.sin(time * 0.11) * 0.6;
+    threeState.camera.position.y = Math.cos(time * 0.09) * 0.4;
+    threeState.camera.lookAt(0, 0, -8);
+    threeState.renderer.render(threeState.scene, threeState.camera);
+}
+
+function resizeThreeRenderer() {
+    if (!threeState.enabled) return;
+    threeState.camera.aspect = w() / h();
+    threeState.camera.updateProjectionMatrix();
+    threeState.renderer.setSize(w(), h(), false);
+    threeState.renderer.setPixelRatio(Math.min(1.2, window.devicePixelRatio || 1));
+}
+
+function disposeThreeBackground() {
+    if (!threeState.enabled) return;
+    disposeHazardMeshes(threeState.whirlpoolMeshes);
+    disposeHazardMeshes(threeState.volcanoMeshes);
+    if (threeState.particles) {
+        if (threeState.particles.geometry) threeState.particles.geometry.dispose();
+        if (threeState.particles.material) threeState.particles.material.dispose();
+    }
+    if (threeState.targetGlow) {
+        if (threeState.targetGlow.geometry) threeState.targetGlow.geometry.dispose();
+        if (threeState.targetGlow.material) threeState.targetGlow.material.dispose();
+    }
+    if (threeState.renderer) {
+        threeState.renderer.dispose();
+        if (threeState.renderer.domElement?.parentNode) {
+            threeState.renderer.domElement.parentNode.removeChild(threeState.renderer.domElement);
+        }
+    }
+    threeState.enabled = false;
+}
+
+function rebuildStaticBackground() {
+    staticBgCanvas.width = w();
+    staticBgCanvas.height = h();
+    const gradient = staticBgCtx.createLinearGradient(0, 0, 0, h());
+    gradient.addColorStop(0, '#091626');
+    gradient.addColorStop(0.55, '#071220');
+    gradient.addColorStop(1, '#04090f');
+    staticBgCtx.fillStyle = gradient;
+    staticBgCtx.fillRect(0, 0, w(), h());
+    if (imageBackground.complete && imageBackground.naturalWidth !== 0) {
+        staticBgCtx.save();
+        staticBgCtx.globalAlpha = 0.24;
+        staticBgCtx.drawImage(imageBackground, 0, 0, w(), h());
+        staticBgCtx.restore();
+    }
+}
+
+imageBackground.addEventListener('load', rebuildStaticBackground);
 
 function initialize() {
     flockA = []; flockB = []; flockC = []; allBoids = []; predators = []; tombstones = []; backgroundFish = []; whirlpools = []; volcanoes = [];
+    disposeHazardMeshes(threeState.whirlpoolMeshes);
+    disposeHazardMeshes(threeState.volcanoMeshes);
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockA_Config); flockA.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockB_Config); flockB.push(b); allBoids.push(b); }
     for (let i = 0; i < NUM_BOIDS_PER_FLOCK; i++) { const b = new Boid(Math.random()*w(), Math.random()*h(), flockC_Config); flockC.push(b); allBoids.push(b); }
     for (let i = 0; i < 4; i++) { predators.push(new Predator(Math.random()*w(), Math.random()*h(), predatorConfig)); }
     for (let i = 0; i < NUM_BACKGROUND_FISH; i++) { const color = BACKGROUND_FISH_COLORS[Math.floor(Math.random() * BACKGROUND_FISH_COLORS.length)]; backgroundFish.push(new BackgroundFish(Math.random() * w(), Math.random() * h(), { ...backgroundFishConfig, color: color })); }
     initialCountA = flockA.length; initialCountB = flockB.length; initialCountC = flockC.length;
-    resizeGrainCanvas();
+    rebuildStaticBackground();
 }
 
-// --- 背景绘制函数 ---
-function drawBackgroundEffect(ctx, time, whirlpools, volcanoes) {
-    const gridSpacing = 60;
-    const waveAmplitude = 3.6;
-    const waveFrequency = 0.04;
-    const heatColor = [255, 138, 32];
-    const defaultGridColor = [85, 120, 155];
-
-    const lerp = (a, b, t) => a + (b - a) * t;
-
-    function getDistortionData(x, y) {
-        let finalPoint = new Vector(x, y);
-        let heat = 0;
-
-        for(const w of whirlpools) {
-            const currentRadius = w.baseRadius * w.lifeCycleProgress;
-            const toPoint = Vector.sub(finalPoint, w.position);
-            const dist = toPoint.mag();
-
-            if (dist > 0 && dist < currentRadius) {
-                const progress = dist / currentRadius;
-                const swirlAngle = (1 - progress) * w.baseStrength * 2.5 * w.lifeCycleProgress;
-                const pinchAmount = dist * (1 - progress) * 0.2;
-                
-                const angle = Math.atan2(toPoint.y, toPoint.x);
-                const finalAngle = angle + swirlAngle;
-                const finalDist = dist - pinchAmount;
-                finalPoint.x = w.position.x + Math.cos(finalAngle) * finalDist;
-                finalPoint.y = w.position.y + Math.sin(finalAngle) * finalDist;
-            }
-        }
-        
-        for(const v of volcanoes) {
-             const toPoint = Vector.sub(finalPoint, v.position);
-             const distToCenter = toPoint.mag();
-
-             if (distToCenter < v.influenceRadius + v.fissureLength / 2) {
-                const cosA = Math.cos(-v.angle);
-                const sinA = Math.sin(-v.angle);
-                const localX = toPoint.x * cosA - toPoint.y * sinA;
-                const localY = toPoint.x * sinA + toPoint.y * cosA;
-
-                if (Math.abs(localX) < v.fissureLength / 2 && Math.abs(localY) < v.influenceRadius) {
-                    const falloff = 1 - Math.abs(localY) / v.influenceRadius;
-                    const displacement = v.displacementStrength * falloff * Math.sign(localY);
-                    
-                    const worldDispX = 0 * cosA - displacement * sinA;
-                    const worldDispY = 0 * sinA + displacement * cosA;
-                    finalPoint.x -= worldDispX;
-                    finalPoint.y -= worldDispY;
-
-                    heat = Math.max(heat, v.heatStrength * falloff);
-                }
-             }
-        }
-        return { point: finalPoint, heat: heat };
-    }
-    
-    ctx.save();
-    ctx.lineWidth = 0.85;
-
-    for (let x = 0; x < w() + gridSpacing; x += gridSpacing) {
-        ctx.beginPath();
-        for (let y = 0; y < h(); y++) {
-            const offsetX = Math.sin(y * waveFrequency + time) * waveAmplitude;
-            const data = getDistortionData(x + offsetX, y);
-            
-            const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
-            const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
-            const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.33)`;
-
-            (y === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
-        }
-        ctx.stroke();
-    }
-    
-    for (let y = 0; y < h() + gridSpacing; y += gridSpacing) {
-        ctx.beginPath();
-        for (let x = 0; x < w(); x++) {
-            const offsetY = Math.sin(x * waveFrequency + time) * waveAmplitude;
-            const data = getDistortionData(x, y + offsetY);
-            
-            const r = lerp(defaultGridColor[0], heatColor[0], data.heat);
-            const g = lerp(defaultGridColor[1], heatColor[1], data.heat);
-            const b = lerp(defaultGridColor[2], heatColor[2], data.heat);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.33)`;
-
-            (x === 0) ? ctx.moveTo(data.point.x, data.point.y) : ctx.lineTo(data.point.x, data.point.y);
-        }
-        ctx.stroke();
-    }
-    ctx.restore();
-}
-
-function drawPostProcessingOverlay(ctx, time, target) {
-    const pulse = 0.5 + 0.5 * Math.sin(time * 0.42);
-    const focus = target || new Vector(
-        w() * 0.5 + Math.sin(time * 0.2) * w() * 0.12,
-        h() * 0.48 + Math.cos(time * 0.18) * h() * 0.1
-    );
+function drawWaterOverlay(ctx, time) {
+    const ambient = ctx.createLinearGradient(0, 0, 0, h());
+    ambient.addColorStop(0, 'rgba(32, 70, 122, 0.16)');
+    ambient.addColorStop(0.5, 'rgba(24, 52, 90, 0.1)');
+    ambient.addColorStop(1, 'rgba(6, 16, 30, 0.26)');
+    ctx.fillStyle = ambient;
+    ctx.fillRect(0, 0, w(), h());
 
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
-    const glow = ctx.createRadialGradient(focus.x, focus.y, 0, focus.x, focus.y, Math.max(w(), h()) * 0.7);
-    glow.addColorStop(0, `rgba(140, 205, 255, ${0.1 + pulse * 0.07})`);
-    glow.addColorStop(0.45, 'rgba(90, 140, 210, 0.08)');
-    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, w(), h());
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i < 6; i++) {
-        const baseY = (h() / 6) * i + Math.sin(time * 0.6 + i) * 26;
-        const alpha = Math.max(0.02, 0.04 + 0.03 * Math.sin(time + i * 1.5));
-        const hue = 185 + i * 7;
-        ctx.strokeStyle = `hsla(${hue}, 85%, 72%, ${alpha})`;
+    for (let i = 0; i < 3; i++) {
+        const baseY = (h() / 4) * (i + 1) + Math.sin(time * 0.5 + i) * 18;
+        ctx.strokeStyle = `rgba(130, 205, 255, ${0.04 + i * 0.02})`;
+        ctx.lineWidth = 1 + i * 0.3;
         ctx.beginPath();
-        for (let x = 0; x <= w(); x += 40) {
-            const y = baseY + Math.sin(x * 0.011 + time * 1.3 + i) * 15;
+        for (let x = 0; x <= w(); x += 55) {
+            const y = baseY + Math.sin(x * 0.014 + time * 1.2 + i) * 10;
             (x === 0) ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         }
         ctx.stroke();
     }
     ctx.restore();
-
-    ctx.save();
-    const vignette = ctx.createRadialGradient(
-        w() / 2, h() / 2, Math.min(w(), h()) * 0.2,
-        w() / 2, h() / 2, Math.max(w(), h()) * 0.78
-    );
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(0.65, 'rgba(0, 0, 0, 0.16)');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.54)');
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, w(), h());
-    ctx.restore();
-
-    if (grainCanvas.width > 0 && grainCanvas.height > 0) {
-        if ((grainFrameCounter++ % 3) === 0) regenerateGrain();
-        ctx.save();
-        ctx.globalCompositeOperation = 'soft-light';
-        ctx.globalAlpha = 0.09;
-        ctx.drawImage(grainCanvas, 0, 0, w(), h());
-        ctx.restore();
-    }
 }
 
-// --- 动画循环 ---
-function animate() {
-    if (imageBackground.complete && imageBackground.naturalWidth !== 0) {
-        ctx.drawImage(imageBackground, 0, 0, w(), h());
-    } else {
-        const fallbackGradient = ctx.createLinearGradient(0, 0, 0, h());
-        fallbackGradient.addColorStop(0, '#0b1221');
-        fallbackGradient.addColorStop(0.6, '#080f1b');
-        fallbackGradient.addColorStop(1, '#05070f');
-        ctx.fillStyle = fallbackGradient;
-        ctx.fillRect(0, 0, w(), h());
-    }
-
-    animationTime += 0.02;
-    const ambientTint = ctx.createLinearGradient(0, 0, w(), h());
-    ambientTint.addColorStop(0, 'rgba(55, 120, 180, 0.12)');
-    ambientTint.addColorStop(0.45, 'rgba(30, 58, 100, 0.06)');
-    ambientTint.addColorStop(1, 'rgba(8, 12, 24, 0.24)');
-    ctx.fillStyle = ambientTint;
-    ctx.fillRect(0, 0, w(), h());
-    
-    if (Math.random() < WHIRLPOOL_SPAWN_CHANCE && whirlpools.length < MAX_WHIRLPOOLS) { whirlpools.push(new Whirlpool(Math.random() * w(), Math.random() * h())); }
-    whirlpools.forEach(w => w.update());
-    whirlpools = whirlpools.filter(w => w.isAlive);
-    
-    if (Math.random() < VOLCANO_SPAWN_CHANCE && volcanoes.length < MAX_VOLCANOES) { volcanoes.push(new Volcano(Math.random() * w(), Math.random() * h())); }
-    volcanoes.forEach(v => v.update());
-    
-    drawBackgroundEffect(ctx, animationTime, whirlpools, volcanoes);
-
-    volcanoes.forEach(v => v.draw(ctx));
-    volcanoes = volcanoes.filter(v => v.isAlive);
-
-    const now = Date.now();
+function drawClickWaves(now) {
     for (let i = clickWaves.length - 1; i >= 0; i--) {
         const wave = clickWaves[i];
         const age = now - wave.startTime;
@@ -782,84 +914,106 @@ function animate() {
         const radius = wave.maxRadius * easeOut;
 
         ctx.save();
-        ctx.strokeStyle = `rgba(120, 205, 255, ${(1 - progress) * 0.95})`;
-        ctx.shadowColor = 'rgba(120, 205, 255, 0.8)';
-        ctx.shadowBlur = 18;
-        ctx.lineWidth = 2 + (1 - progress) * 1.8;
+        ctx.strokeStyle = `rgba(120, 205, 255, ${(1 - progress) * 0.92})`;
+        ctx.shadowColor = 'rgba(120, 205, 255, 0.82)';
+        ctx.shadowBlur = 14;
+        ctx.lineWidth = 2.2 + (1 - progress) * 1.6;
         ctx.beginPath();
         ctx.arc(wave.position.x, wave.position.y, radius, 0, Math.PI * 2);
         ctx.stroke();
-
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = `rgba(180, 232, 255, ${(1 - progress) * 0.55})`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(wave.position.x, wave.position.y, radius * 0.65, 0, Math.PI * 2);
-        ctx.stroke();
         ctx.restore();
     }
-    
+}
+
+// --- 动画循环 ---
+function animate() {
+    animationTime += 0.02;
+    renderThreeBackground(animationTime, mouseTarget);
+
+    ctx.clearRect(0, 0, w(), h());
+    ctx.drawImage(staticBgCanvas, 0, 0, w(), h());
+    drawWaterOverlay(ctx, animationTime);
+
+    if (Math.random() < WHIRLPOOL_SPAWN_CHANCE && whirlpools.length < MAX_WHIRLPOOLS) { whirlpools.push(new Whirlpool(Math.random() * w(), Math.random() * h())); }
+    whirlpools.forEach(wObj => wObj.update());
+    whirlpools = whirlpools.filter(wObj => wObj.isAlive);
+
+    if (Math.random() < VOLCANO_SPAWN_CHANCE && volcanoes.length < MAX_VOLCANOES) { volcanoes.push(new Volcano(Math.random() * w(), Math.random() * h())); }
+    volcanoes.forEach(vObj => vObj.update());
+    syncThreeHazards(whirlpools, volcanoes);
+
+    volcanoes.forEach(vObj => vObj.draw(ctx));
+    volcanoes = volcanoes.filter(vObj => vObj.isAlive);
+
+    const now = Date.now();
+    drawClickWaves(now);
+
     backgroundFish.forEach(fish => { fish.update(whirlpools, volcanoes); fish.edges(); fish.draw(ctx); });
 
-    let newborns = [], newbornCountA=0, newbornCountB=0, newbornCountC=0;
-    allBoids.forEach(boid => { let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC; boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget, whirlpools, volcanoes); boid.update(); boid.edges(); boid.draw(ctx); const newborn = boid.handleReproduction(ownFlock); if (newborn) { newborns.push(newborn); } });
-    
-    newborns.forEach(nb => { allBoids.push(nb); if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; newbornCountA++; } else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; newbornCountB++; } else { flockC.push(nb); initialCountC++; newbornCountC++; } });
-    const playBirthSound = (sound, count) => { if (count > 0 && audioInitialized) { const v = MIN_BIRTH_VOLUME + Math.min(1, count / BABIES_FOR_MAX_BIRTH_VOLUME) * (MAX_BIRTH_VOLUME - MIN_BIRTH_VOLUME); sound.volume = v; sound.currentTime = 0; sound.play().catch(e => {}); } };
+    let newborns = [], newbornCountA = 0, newbornCountB = 0, newbornCountC = 0;
+    allBoids.forEach(boid => { let ownFlock = (boid.config.color === flockA_Config.color) ? flockA : (boid.config.color === flockB_Config.color) ? flockB : flockC; boid.applyBehaviors(allBoids, ownFlock, predators, tombstones, mouseTarget, whirlpools, volcanoes); boid.update(); boid.edges(); boid.draw(ctx); const newborn = boid.handleReproduction(ownFlock); if (newborn) newborns.push(newborn); });
+
+    newborns.forEach(nb => {
+        if (allBoids.length >= MAX_TOTAL_BOIDS) return;
+        allBoids.push(nb);
+        if (nb.config.color === flockA_Config.color) { flockA.push(nb); initialCountA++; newbornCountA++; }
+        else if (nb.config.color === flockB_Config.color) { flockB.push(nb); initialCountB++; newbornCountB++; }
+        else { flockC.push(nb); initialCountC++; newbornCountC++; }
+    });
+    const playBirthSound = (sound, count) => { if (count > 0 && audioInitialized) { const v = MIN_BIRTH_VOLUME + Math.min(1, count / BABIES_FOR_MAX_BIRTH_VOLUME) * (MAX_BIRTH_VOLUME - MIN_BIRTH_VOLUME); sound.volume = v; sound.currentTime = 0; sound.play().catch(() => {}); } };
     playBirthSound(birthSoundA, newbornCountA); playBirthSound(birthSoundB, newbornCountB); playBirthSound(birthSoundC, newbornCountC);
 
     predators.forEach(predator => { predator.applyBehaviors(allBoids, predators, whirlpools, volcanoes); predator.update(); predator.edges(); predator.draw(ctx); for (let i = allBoids.length - 1; i >= 0; i--) { const boid = allBoids[i]; if (boid.isAlive && Vector.dist(predator.position, boid.position) < predator.config.killRadius) { boid.isAlive = false; boid.deathTime = Date.now(); tombstones.push(boid); allBoids.splice(i, 1); } } });
-    
-    // *** FIX START: 改变火山杀伤逻辑，从半径检测改为粒子碰撞检测 ***
-    for (const v of volcanoes) {
-        // 只有在火山活跃喷发期（热度高）时，其粒子才具有杀伤力
-        if (v.heatStrength > 0.5) { 
-            for (const p of v.particles) {
-                // 粒子必须是存活状态
-                if (p.life > 0) {
-                    // 检查 Boids
-                    for (let i = allBoids.length - 1; i >= 0; i--) {
-                        const boid = allBoids[i];
-                        // 碰撞检测：智能体与粒子的距离 < 粒子半径 + 智能体大致半径
-                        if (boid.isAlive && Vector.dist(boid.position, p.pos) < p.size + 8) { // Boid 大致半径为 8
-                            boid.isAlive = false;
-                            boid.deathTime = Date.now();
-                            tombstones.push(boid);
-                            allBoids.splice(i, 1);
-                        }
+
+    for (const vObj of volcanoes) {
+        if (vObj.heatStrength > 0.5) {
+            for (const p of vObj.particles) {
+                if (p.life <= 0) continue;
+                for (let i = allBoids.length - 1; i >= 0; i--) {
+                    const boid = allBoids[i];
+                    if (boid.isAlive && Vector.dist(boid.position, p.pos) < p.size + 8) {
+                        boid.isAlive = false;
+                        boid.deathTime = Date.now();
+                        tombstones.push(boid);
+                        allBoids.splice(i, 1);
                     }
-                    // 检查捕食者
-                    for (let i = predators.length - 1; i >= 0; i--) {
-                        const pred = predators[i];
-                        if (pred.isAlive && Vector.dist(pred.position, p.pos) < p.size + 12) { // 捕食者体型更大，半径约 12
-                            pred.isAlive = false;
-                            predators.splice(i, 1);
-                        }
+                }
+                for (let i = predators.length - 1; i >= 0; i--) {
+                    const pred = predators[i];
+                    if (pred.isAlive && Vector.dist(pred.position, p.pos) < p.size + 12) {
+                        pred.isAlive = false;
+                        predators.splice(i, 1);
                     }
-                    // 检查背景鱼
-                    for (let i = backgroundFish.length - 1; i >= 0; i--) {
-                        const fish = backgroundFish[i];
-                        if (fish.isAlive && Vector.dist(fish.position, p.pos) < p.size + 4) { // 背景鱼体型小，半径约 4
-                            fish.isAlive = false;
-                            backgroundFish.splice(i, 1);
-                        }
+                }
+                for (let i = backgroundFish.length - 1; i >= 0; i--) {
+                    const fish = backgroundFish[i];
+                    if (fish.isAlive && Vector.dist(fish.position, p.pos) < p.size + 4) {
+                        fish.isAlive = false;
+                        backgroundFish.splice(i, 1);
                     }
                 }
             }
         }
     }
-    // *** FIX END ***
 
     flockA = flockA.filter(b => b.isAlive); flockB = flockB.filter(b => b.isAlive); flockC = flockC.filter(b => b.isAlive);
-    tombstones.forEach(t => t.draw(ctx)); tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
-    drawPostProcessingOverlay(ctx, animationTime, mouseTarget);
+    tombstones.forEach(t => t.draw(ctx));
+    tombstones = tombstones.filter(t => Date.now() - t.deathTime < 3000);
+
+    if (mouseTarget) {
+        const focusGlow = ctx.createRadialGradient(mouseTarget.x, mouseTarget.y, 8, mouseTarget.x, mouseTarget.y, 110);
+        focusGlow.addColorStop(0, 'rgba(145, 222, 255, 0.18)');
+        focusGlow.addColorStop(1, 'rgba(145, 222, 255, 0)');
+        ctx.fillStyle = focusGlow;
+        ctx.fillRect(mouseTarget.x - 112, mouseTarget.y - 112, 224, 224);
+    }
 
     let targetAmbience = { a: 0, b: 0, c: 0 };
     const interactionPairs = [ { f1: flockA, f2: flockB, k1: 'a', k2: 'b' }, { f1: flockA, f2: flockC, k1: 'a', k2: 'c' }, { f1: flockB, f2: flockC, k1: 'b', k2: 'c' } ];
     for (const pair of interactionPairs) {
         if (pair.f1.length < MIN_BOIDS_FOR_MEETING || pair.f2.length < MIN_BOIDS_FOR_MEETING) continue;
         const nearBoids1 = [], nearBoids2 = new Set();
-        for (const b1 of pair.f1) { let isNear = false; for (const b2 of pair.f2) { if (Vector.dist(b1.position, b2.position) < MEETING_RADIUS) { isNear = true; nearBoids2.add(b2); } } if (isNear) { nearBoids1.push(b1); } }
+        for (const b1 of pair.f1) { let isNear = false; for (const b2 of pair.f2) { if (Vector.dist(b1.position, b2.position) < MEETING_RADIUS) { isNear = true; nearBoids2.add(b2); } } if (isNear) nearBoids1.push(b1); }
         if (nearBoids1.length >= MIN_BOIDS_FOR_MEETING && nearBoids2.size >= MIN_BOIDS_FOR_MEETING) {
             const avgVel1 = new Vector(); nearBoids1.forEach(b => avgVel1.add(b.velocity)); avgVel1.div(nearBoids1.length);
             const avgVel2 = new Vector(); nearBoids2.forEach(b => avgVel2.add(b.velocity)); avgVel2.div(nearBoids2.size);
@@ -896,9 +1050,16 @@ canvas.addEventListener('mousedown', e => {
         playSound(soundC, masterVolume * (awareCounts.c / totalAware));
     }
 });
-window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; initialize(); });
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    resizeThreeRenderer();
+    initialize();
+});
+window.addEventListener('beforeunload', disposeThreeBackground);
 
 // 启动
+initThreeBackground();
 initialize();
 animate();
 </script>
